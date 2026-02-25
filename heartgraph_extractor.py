@@ -43,14 +43,22 @@ def extract_date(image_path):
     """Extract the date from the screenshot header by cropping the top."""
     img = Image.open(image_path)
     header = img.crop((0, 0, img.width, int(img.height * 0.12)))
-    text = pytesseract.image_to_string(header)
+    header_text = pytesseract.image_to_string(header)
 
-    # Look for patterns like "20 Feb 22:46" or "16 Dec 12:56"
-    match = re.search(
-        r'(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2}):(\d{2})',
-        text,
-        re.IGNORECASE,
-    )
+    # Fall back to full image if header crop yields nothing useful
+    full_text = pytesseract.image_to_string(img)
+    text = header_text if header_text.strip() else full_text
+
+    date_pattern = r'(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2}):(\d{2})'
+
+    # Try header crop first, then full image
+    match = re.search(date_pattern, header_text, re.IGNORECASE)
+    if not match:
+        match = re.search(date_pattern, full_text, re.IGNORECASE)
+
+    if not match:
+        print(f"    Header OCR output: {repr(header_text.strip())}")
+
     if match:
         day = int(match.group(1))
         month_str = match.group(2)
