@@ -32,6 +32,29 @@ from pathlib import Path
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 
+# On Windows, Tesseract is typically installed to a fixed location.
+# Set the path automatically if it exists so users don't need to add it to PATH manually.
+_win_tesseract = Path(r'C:\Program Files\Tesseract-OCR\tesseract.exe')
+if sys.platform == 'win32' and _win_tesseract.exists():
+    pytesseract.pytesseract.tesseract_cmd = str(_win_tesseract)
+
+
+def _check_tesseract():
+    """Verify Tesseract is available and print a helpful message if not."""
+    try:
+        pytesseract.get_tesseract_version()
+    except pytesseract.TesseractNotFoundError:
+        print("ERROR: Tesseract OCR is not installed or cannot be found.")
+        print()
+        print("Install it from: https://github.com/UB-Mannheim/tesseract/wiki")
+        print("  (choose the Windows 64-bit installer)")
+        print()
+        print("After installing, either:")
+        print("  • Restart this terminal so PATH is updated, or")
+        print("  • Install to the default location:")
+        print("    C:\\Program Files\\Tesseract-OCR\\  (detected automatically)")
+        sys.exit(1)
+
 
 def extract_text(image_path):
     """Extract text from a screenshot using OCR."""
@@ -419,6 +442,8 @@ def create_excel(daily_data, output_path):
 
 
 def main():
+    _check_tesseract()
+
     if len(sys.argv) < 2:
         print("Usage: python heartgraph_extractor.py <screenshot_folder> [output.xlsx]")
         print()
