@@ -204,14 +204,23 @@ def extract_summary(text):
 
 def classify_screenshot(text):
     """Determine if a screenshot is a 'zones' or 'summary' type."""
+    # "Zone" and "Time" on the same line (compact layout)
     if re.search(r'Zone\s+Time', text, re.IGNORECASE):
+        return 'zones'
+    # Circled zone-number characters (⑤④③②①) are unique to the zones table
+    if re.search(r'[⑤④③②①]', text):
+        return 'zones'
+    # "Zone" header present + percentages (OCR split "Zone" / "Time" onto separate lines,
+    # and also tolerate '°' which OCR sometimes substitutes for '%')
+    pct_count = text.count('%') + text.count('°')
+    if re.search(r'\bZone\b', text, re.IGNORECASE) and pct_count >= 3:
         return 'zones'
     if re.search(r'Duration:', text, re.IGNORECASE):
         return 'summary'
     if re.search(r'Maximum\s+heart\s+rate', text, re.IGNORECASE):
         return 'summary'
-    # Fallback: if it has percentages with zone markers, it's zones
-    if text.count('%') >= 4:
+    # Fallback percentage count (tolerate '°' for '%')
+    if pct_count >= 4:
         return 'zones'
     if re.search(r'Mean\s+heart', text, re.IGNORECASE):
         return 'summary'
