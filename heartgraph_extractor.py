@@ -129,25 +129,24 @@ def extract_zones(text):
             continue
 
         # Strategy 1: line has percentage AND time (e.g., "0.3% 4:48" or "85.1% 12:03:22")
+        # Also allow '°' which OCR sometimes substitutes for '%'
         match = re.search(
-            r'(\d{1,3}\.?\d*)%\s+(?:.*?\s+)?(\d{1,2}:\d{2}(?::\d{2})?)', line
+            r'(\d{1,3}\.?\d*)\s*[%°]\s+(?:.*?\s+)?(\d{1,2}:\d{2}(?::\d{2})?)', line
         )
         if match:
             zone_data.append(match.group(2))
             continue
 
-        # Strategy 2: line has a zone marker (@, ©, ⑤, etc.) and a time but no percentage
-        # e.g., "@ 8:18:31" or "© 1:42:51"
-        # Only match if line looks like a zone row (short, with a time at the end)
-        match = re.search(r'^[^a-zA-Z]*(\d{1,2}:\d{2}:\d{2})\s*$', line)
+        # Strategy 2: line is mostly non-letter characters ending with a time (H:MM:SS or M:SS).
+        # Handles cases where OCR drops the '%' entirely, e.g. "0.3 4:17" or "@ 8:18:31".
+        match = re.search(r'^[^a-zA-Z]*(\d{1,2}:\d{2}(?::\d{2})?)\s*$', line)
         if match:
             zone_data.append(match.group(1))
             continue
 
-        # Strategy 3: line has just M:SS at the end (short zone times like "0:07", "8:45")
-        # but only if we're already collecting zone data or line has zone-like markers
-        match = re.search(r'[©@®⑤④③②①\(\)]\s*.*?(\d{1,2}:\d{2})\s*$', line)
-        if match and ':' in match.group(1):
+        # Strategy 3: line has a zone marker symbol and a time (M:SS or H:MM:SS)
+        match = re.search(r'[©@®⑤④③②①\(\)]\s*.*?(\d{1,2}:\d{2}(?::\d{2})?)\s*$', line)
+        if match:
             zone_data.append(match.group(1))
             continue
 
