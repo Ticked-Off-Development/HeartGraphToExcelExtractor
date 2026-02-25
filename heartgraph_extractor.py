@@ -215,8 +215,16 @@ def process_screenshots(folder_path):
     # Collect all data grouped by date
     daily_data = {}
 
+    all_files = sorted(folder.iterdir())
+    if not all_files:
+        print(f"  ⚠ Folder appears to be empty or inaccessible: {folder}")
+    else:
+        non_image = [f.name for f in all_files if f.suffix.lower() not in image_extensions and f.is_file()]
+        if non_image:
+            print(f"  Files found but not matched as images: {non_image}")
+
     image_files = sorted(
-        [f for f in folder.iterdir() if f.suffix.lower() in image_extensions]
+        [f for f in all_files if f.suffix.lower() in image_extensions]
     )
 
     print(f"Found {len(image_files)} image files to process...")
