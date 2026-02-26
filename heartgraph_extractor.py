@@ -369,7 +369,14 @@ def _process_folder(folder, year, image_extensions, daily_data):
                     print(f"  ⚠ Could not parse zone data")
 
             elif screenshot_type == 'summary':
-                summary = extract_summary(text)
+                # Use the binarised data-region crop for extraction; the same
+                # grid noise that breaks zone extraction also garbles numbers
+                # in "Heart rate range: 45 - 95" / "Mean heart rate: 57.4".
+                if data_region_text is None:
+                    data_region_text = _ocr_crop(img_path, 0.08, 0.32)
+                summary = extract_summary(data_region_text)
+                if not summary:
+                    summary = extract_summary(text)
                 if summary:
                     daily_data[date_key]['summary_sessions'].append(summary)
                     print(f"  Summary extracted: {summary}")
