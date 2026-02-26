@@ -178,14 +178,21 @@ def extract_zones(text):
             zone_data.append(match.group(2))
             continue
 
-        # Strategy 2: line is mostly non-letter characters ending with a time (H:MM:SS or M:SS).
-        # Handles cases where OCR drops the '%' entirely, e.g. "0.3 4:17" or "@ 8:18:31".
-        # Exclude whole-hour clock times (e.g. "3:00", "7:00") — these are x-axis
-        # time-of-day labels on the heart-rate graph, not zone durations.
-        match = re.search(r'^[^a-zA-Z]*(\d{1,2}:\d{2}(?::\d{2})?)\s*$', line)
-        if match and not re.match(r'^\d{1,2}:00$', match.group(1)):
-            zone_data.append(match.group(1))
-            continue
+        # Strategy 2: line contains no letters and ends with a time (H:MM:SS or M:SS).
+        # Handles OCR-dropped '%' (e.g. "0.3 4:17") and bare time-only lines.
+        #
+        # The previous pattern '^[^a-zA-Z]*(\d{1,2}:\d{2}...)' had a backtracking
+        # bug: the greedy [^a-zA-Z]* consumed leading digits (e.g. the "1" in
+        # "10:12" or "22:3" in "22:38:39"), leaving a shorter tail ("0:12", "8:39")
+        # for the capture group.  Fix: check for letters separately, then use a
+        # plain end-anchored search so re finds the time from the leftmost digit.
+        #
+        # Also exclude whole-hour clock times (e.g. "3:00") — x-axis labels.
+        if not re.search(r'[a-zA-Z]', line):
+            m2 = re.search(r'(\d{1,2}:\d{2}(?::\d{2})?)\s*$', line)
+            if m2 and not re.match(r'^\d{1,2}:00$', m2.group(1)):
+                zone_data.append(m2.group(1))
+                continue
 
         # Strategy 3: line has a zone marker symbol and a time (M:SS or H:MM:SS)
         match = re.search(r'[©@®⑤④③②①\(\)]\s*.*?(\d{1,2}:\d{2}(?::\d{2})?)\s*$', line)
