@@ -284,13 +284,18 @@ def extract_summary(text):
     #
     # Strategy 1 (normal): decimal appears after the label.  Accept both '.'
     # and ',' as the decimal separator (OCR occasionally substitutes a comma).
+    # Guard: only accept values in the plausible 24-hour mean HR range [30–200];
+    # without this, DOTALL can grab a spurious large number from the graph area
+    # (e.g. "560.2" when the real value is "50.2").
     match = re.search(
         r'Mean\s+heart.*?(\d+[.,]\d+)',
         text,
         re.IGNORECASE | re.DOTALL,
     )
     if match:
-        summary['mean_hr'] = float(match.group(1).replace(',', '.'))
+        val = float(match.group(1).replace(',', '.'))
+        if 30 <= val <= 200:
+            summary['mean_hr'] = val
 
     # Strategy 2 (values-before-labels): Tesseract read the right column
     # first, so "59.7" sits before "Mean heart rate:" in the OCR text and
@@ -544,8 +549,27 @@ def _process_folder(folder, year, image_extensions, daily_data):
                 if data_region_text is None:
                     data_region_text = _ocr_crop(img_path, 0.08, 0.32)
                 summary = extract_summary(data_region_text)
-                if not summary:
-                    summary = extract_summary(text)
+
+                # If the narrow crop returned only one of {max_hr, mean_hr},
+                # try progressively larger sources and *merge* any new values
+                # rather than replacing.  The narrow crop is preferred because
+                # the full image includes graph Y-axis numbers that can produce
+                # false-positive matches, but those false positives are now also
+                # blocked by the range guards inside extract_summary.
+                if len(summary) < 2:
+                    # Step 1: slightly wider crop — catches stats that sit just
+                    # outside the 8-32 % band in some UI layouts.
+                    wider = _ocr_crop(img_path, 0.06, 0.38)
+                    for k, v in extract_summary(wider).items():
+                        if k not in summary:
+                            summary[k] = v
+
+                if len(summary) < 2:
+                    # Step 2: full-image text as last resort.
+                    for k, v in extract_summary(text).items():
+                        if k not in summary:
+                            summary[k] = v
+
                 if summary:
                     daily_data[date_key]['summary_sessions'].append(summary)
                     print(f"  Summary extracted: {summary}")
