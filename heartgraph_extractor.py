@@ -328,11 +328,15 @@ def extract_summary(text):
     # right column first AND dropped the decimal point, so the integer mean HR
     # sits before the "Mean heart rate:" label and strategies 1–3 all miss it.
     # Take the last plausible integer in the text preceding the label.
+    # Exclude the already-identified max_hr: in a values-first layout the range
+    # "48 - 95" also appears before the label, so without this guard the max HR
+    # integer (95) would be mistakenly returned as the mean HR.
     if 'mean_hr' not in summary:
         label_m = re.search(r'Mean\s+heart', text, re.IGNORECASE)
         if label_m:
             integers = [int(n) for n in re.findall(r'\b(\d{2,3})\b', text[:label_m.start()])]
-            candidates = [v for v in integers if 30 <= v <= 200]
+            max_known = summary.get('max_hr')
+            candidates = [v for v in integers if 30 <= v <= 200 and v != max_known]
             if candidates:
                 summary['mean_hr'] = float(candidates[-1])
 
