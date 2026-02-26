@@ -242,24 +242,38 @@ def extract_summary(text):
                 summary['max_hr'] = int(m.group(2))
 
     # Format 2: "Maximum heart rate: YYY" (older) → max HR = YYY
-    # Forward search.
+    #
+    # Uses the same DOTALL + range-check approach as Format 1 to handle all
+    # three OCR column orderings:
+    #   single-line    "Maximum heart rate: 75\n..."
+    #   labels-first   "Maximum heart rate:\nMean heart rate:\n...\n75\n55.8"
+    #   values-first   "75\n55.8\n...\nMaximum heart rate:\nMean heart rate:"
+    #
+    # For labels-first, [:\s]+(\d+) stopped at the 'M' of "Mean" and failed.
+    # DOTALL lets .*? cross line-boundaries; taking the first \d{2,3} in the
+    # plausible HR range [60–220] skips Duration time components (4, 24, 06)
+    # that all fall below 60.
     if 'max_hr' not in summary:
-        match = re.search(
-            r'(?:Maximum\s+heart\s+rate|Max\w*\s+heart\s+rate)[:\s]+(\d+)',
+        label_m = re.search(
+            r'(?:Maximum\s+heart\s+rate|Max\w*\s+heart\s+rate)',
             text,
             re.IGNORECASE,
         )
-        if match:
-            summary['max_hr'] = int(match.group(1))
+        if label_m:
+            # Forward: scan text after the label
+            for n in re.findall(r'\b(\d{2,3})\b', text[label_m.end():]):
+                if 60 <= int(n) <= 220:
+                    summary['max_hr'] = int(n)
+                    break
 
     # Backward search for Format 2 (values-before-labels column order):
-    # The max HR integer appears before "Maximum heart rate:" in the text.
-    # HeartGraph lists max HR above mean HR on screen, so in values-first OCR
-    # the max HR integer is the FIRST plausible HR value (≥ 60 bpm) before the
-    # label.  Duration time components (e.g. "14", "00", "18") all fall below
-    # 60 and are safely excluded by the range check.
+    # max HR integer sits before the label; take the first plausible value.
     if 'max_hr' not in summary:
-        label_m = re.search(r'(?:Maximum|Max\w*)\s+heart\s+rate', text, re.IGNORECASE)
+        label_m = re.search(
+            r'(?:Maximum\s+heart\s+rate|Max\w*\s+heart\s+rate)',
+            text,
+            re.IGNORECASE,
+        )
         if label_m:
             integers = [int(n) for n in re.findall(r'\b(\d{2,3})\b', text[:label_m.start()])]
             candidates = [v for v in integers if 60 <= v <= 220]
