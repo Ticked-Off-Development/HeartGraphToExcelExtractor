@@ -13,6 +13,17 @@ SCREENSHOT NAMING:
     - Two screenshots per day: one with zone times, one with summary stats
     - Screenshots from the same date are automatically paired
 
+FOLDER STRUCTURE (year-based):
+    Because the screenshot header omits the year, images should be placed in
+    year-named subfolders so the correct year is used automatically:
+
+        screenshots/
+            2025/   ← images taken in 2025
+            2026/   ← images taken in 2026
+
+    The script can also be pointed directly at a year folder:
+        python heartgraph_extractor.py screenshots/2026
+
 DATE OFFSET:
     - Since tracking starts at 10:45 PM, a screenshot dated "20 Feb"
       corresponds to February 21 in the spreadsheet (next day).
@@ -62,15 +73,18 @@ def extract_text(image_path):
     return pytesseract.image_to_string(img)
 
 
-def extract_date(image_path):
-    """Extract the date from the screenshot header by cropping the top."""
+def extract_date(image_path, year=None):
+    """Extract the date from the screenshot header by cropping the top.
+
+    year - if provided, use this year; otherwise fall back to the current
+           calendar year (legacy flat-folder behaviour).
+    """
     img = Image.open(image_path)
     header = img.crop((0, 0, img.width, int(img.height * 0.12)))
     header_text = pytesseract.image_to_string(header)
 
     # Fall back to full image if header crop yields nothing useful
     full_text = pytesseract.image_to_string(img)
-    text = header_text if header_text.strip() else full_text
 
     date_pattern = r'(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2}):(\d{2})'
 
@@ -91,7 +105,8 @@ def extract_date(image_path):
             'jul': 7, 'aug': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12,
         }
         month = month_map[month_str.lower()]
-        year = datetime.now().year
+        if year is None:
+            year = datetime.now().year
 
         screenshot_date = datetime(year, month, day)
 
@@ -105,6 +120,12 @@ def extract_date(image_path):
         return actual_date
 
     return None
+
+
+def _year_from_name(name):
+    """Return the year as int if name is a 4-digit year string (19xx or 20xx), else None."""
+    m = re.fullmatch(r'((?:19|20)\d{2})', name)
+    return int(m.group(1)) if m else None
 
 
 def extract_zones(text):
@@ -238,34 +259,31 @@ def normalize_time(time_str):
     return time_str
 
 
-def process_screenshots(folder_path):
-    """Process all screenshots in a folder and group by date."""
-    folder = Path(folder_path)
-    image_extensions = {'.png', '.jpg', '.jpeg', '.bmp', '.tiff'}
+def _process_folder(folder, year, image_extensions, daily_data):
+    """Process all images in a single folder, appending results to daily_data.
 
-    # Collect all data grouped by date
-    daily_data = {}
-
+    year - int year to use for dates, or None to fall back to current year.
+    """
     all_files = sorted(folder.iterdir())
     if not all_files:
         print(f"  ⚠ Folder appears to be empty or inaccessible: {folder}")
-    else:
-        non_image = [f.name for f in all_files if f.suffix.lower() not in image_extensions and f.is_file()]
-        if non_image:
-            print(f"  Files found but not matched as images: {non_image}")
+        return
 
-    image_files = sorted(
-        [f for f in all_files if f.suffix.lower() in image_extensions]
-    )
+    non_image = [f.name for f in all_files if f.suffix.lower() not in image_extensions and f.is_file()]
+    if non_image:
+        print(f"  Files found but not matched as images: {non_image}")
 
-    print(f"Found {len(image_files)} image files to process...")
+    image_files = sorted([f for f in all_files if f.suffix.lower() in image_extensions])
+
+    year_label = str(year) if year is not None else "current year"
+    print(f"Found {len(image_files)} image files to process (year: {year_label})...")
 
     for img_path in image_files:
         print(f"\nProcessing: {img_path.name}")
 
         try:
             text = extract_text(img_path)
-            date = extract_date(img_path)
+            date = extract_date(img_path, year=year)
 
             if date is None:
                 print(f"  ⚠ Could not extract date, skipping")
@@ -303,6 +321,44 @@ def process_screenshots(folder_path):
         except Exception as e:
             print(f"  ✗ Error: {e}")
 
+
+def process_screenshots(folder_path):
+    """Process screenshots and group by date.
+
+    Supports three layouts:
+
+    1. Year subfolders (recommended):
+           screenshots/2025/  screenshots/2026/
+       The year is taken from the subfolder name.
+
+    2. Year folder passed directly:
+           python heartgraph_extractor.py screenshots/2026
+       The year is taken from the folder name.
+
+    3. Flat folder (legacy):
+           screenshots/IMG_001.png  …
+       The current calendar year is used (may be wrong for old images).
+    """
+    folder = Path(folder_path)
+    image_extensions = {'.png', '.jpg', '.jpeg', '.bmp', '.tiff'}
+    daily_data = {}
+
+    # Case 1: folder contains year-named subfolders
+    year_subdirs = sorted(
+        [d for d in folder.iterdir() if d.is_dir() and _year_from_name(d.name) is not None]
+    )
+    if year_subdirs:
+        for subdir in year_subdirs:
+            year = _year_from_name(subdir.name)
+            print(f"\n--- Processing year {year} ({subdir.name}/) ---")
+            _process_folder(subdir, year, image_extensions, daily_data)
+        return daily_data
+
+    # Case 2: the folder itself is a year folder
+    folder_year = _year_from_name(folder.name)
+
+    # Case 3 (flat) or Case 2: process images directly in the folder
+    _process_folder(folder, folder_year, image_extensions, daily_data)
     return daily_data
 
 
