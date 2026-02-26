@@ -180,8 +180,10 @@ def extract_zones(text):
 
         # Strategy 2: line is mostly non-letter characters ending with a time (H:MM:SS or M:SS).
         # Handles cases where OCR drops the '%' entirely, e.g. "0.3 4:17" or "@ 8:18:31".
+        # Exclude whole-hour clock times (e.g. "3:00", "7:00") — these are x-axis
+        # time-of-day labels on the heart-rate graph, not zone durations.
         match = re.search(r'^[^a-zA-Z]*(\d{1,2}:\d{2}(?::\d{2})?)\s*$', line)
-        if match:
+        if match and not re.match(r'^\d{1,2}:00$', match.group(1)):
             zone_data.append(match.group(1))
             continue
 
@@ -533,7 +535,14 @@ def _process_folder(folder, year, image_extensions, daily_data):
                     if s is not None
                 ]
                 if not candidate_sources:
-                    candidate_sources = [_ocr_crop(img_path, 0.04, 0.32, binarize=False)]
+                    # Image was classified from the full frame without generating
+                    # any crops.  Try both the top strip (zone table above the
+                    # graph) and the lower half (zone table below the graph),
+                    # since the layout varies across HeartGraph versions.
+                    candidate_sources = [
+                        _ocr_crop(img_path, 0.04, 0.32, binarize=False),
+                        _ocr_crop(img_path, 0.45, 0.85, binarize=False),
+                    ]
                 zones = {}
                 for src in candidate_sources:
                     candidate = extract_zones(src)
