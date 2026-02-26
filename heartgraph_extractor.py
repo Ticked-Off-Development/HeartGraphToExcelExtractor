@@ -73,20 +73,24 @@ def extract_text(image_path):
     return pytesseract.image_to_string(img)
 
 
-def _ocr_crop(image_path, top_frac, bottom_frac):
+def _ocr_crop(image_path, top_frac, bottom_frac, binarize=True):
     """OCR a horizontal strip of the image between top_frac and bottom_frac (0→1).
 
-    Converts to greyscale and binarises before OCR.  The zone table and summary
-    stats sit on top of a coloured graph-paper grid (teal lines, zone-band fills).
-    Text luminance is ≲160; grid/background luminance is ≳190.  Binarising at
-    160 gives Tesseract a clean black-on-white image and dramatically improves
-    recognition on these backgrounds.
+    binarize=True (default): converts to greyscale then applies a fixed
+        threshold (luminance > 160 → white).  Works well when the text sits on
+        a uniform teal grid background (luminance ≳ 190).
+
+    binarize=False: passes raw greyscale to Tesseract and lets it use its own
+        adaptive (Otsu) thresholding.  Better when text sits on coloured zone
+        bands whose luminance varies widely (red ≈ 120, blue ≈ 130, teal ≈ 195)
+        — a fixed threshold turns those bands solid black and masks the text.
     """
     img = Image.open(image_path)
     crop = img.crop((0, int(img.height * top_frac), img.width, int(img.height * bottom_frac)))
     gray = crop.convert('L')
-    binary = gray.point(lambda x: 255 if x > 160 else 0)
-    return pytesseract.image_to_string(binary)
+    if binarize:
+        gray = gray.point(lambda x: 255 if x > 160 else 0)
+    return pytesseract.image_to_string(gray)
 
 
 def extract_date(image_path, year=None):
@@ -400,17 +404,40 @@ def _process_folder(folder, year, image_extensions, daily_data):
                 if len(time_matches) >= 5:
                     screenshot_type = 'zones'
 
-            # Second fallback specifically for zones pages: the zone-row
-            # statistics (Zone 5 … Zone 1 with times and percentages) sit in
-            # the lower half of the screen (~45–85 % of height), well below the
-            # narrow 8–32 % strip used for summary/stats identification.
+            # Second fallback: the zone table sits directly on the coloured
+            # zone-band graph background.  Binarising at a fixed threshold of
+            # 160 turns the coloured bands (red ≈ 120, blue ≈ 130) black and
+            # masks the overlaid text.  Re-OCR without binarisation so Tesseract
+            # can apply its own adaptive (Otsu) threshold to handle the varying
+            # background.  Also widen the crop to start at 4 % so the
+            # "Zone"/"Time" column headers at ~7.5 % are not clipped.
+            no_binary_text = None
+            if screenshot_type == 'unknown':
+                no_binary_text = _ocr_crop(img_path, 0.04, 0.32, binarize=False)
+                screenshot_type = classify_screenshot(no_binary_text)
+                if screenshot_type == 'unknown':
+                    time_matches = re.findall(
+                        r'\b\d{1,2}:\d{2}(?::\d{2})?\b', no_binary_text
+                    )
+                    if len(time_matches) >= 3:
+                        screenshot_type = 'zones'
+
+            # Third fallback: check the footer strip (88–100 %) for
+            # "Set Reference" — a button unique to the zones page that sits
+            # *below* the coloured zone bands and is reliably readable.
+            if screenshot_type == 'unknown':
+                footer_text = _ocr_crop(img_path, 0.88, 1.0)
+                if re.search(r'Set\s+Reference', footer_text, re.IGNORECASE):
+                    screenshot_type = 'zones'
+
+            # Fourth fallback specifically for zones pages whose zone-row
+            # statistics sit in the lower half of the screen (~45–85 % of
+            # height), well below the narrow 8–32 % strip.
             zones_region_text = None
             if screenshot_type == 'unknown':
                 zones_region_text = _ocr_crop(img_path, 0.45, 0.85)
                 screenshot_type = classify_screenshot(zones_region_text)
                 if screenshot_type == 'unknown':
-                    # Classifier still unsure; count time-format values in the
-                    # lower crop — 3 or more strongly indicates a zones screen.
                     time_matches = re.findall(
                         r'\b\d{1,2}:\d{2}(?::\d{2})?\b', zones_region_text
                     )
@@ -427,16 +454,26 @@ def _process_folder(folder, year, image_extensions, daily_data):
                 }
 
             if screenshot_type == 'zones':
-                # Prefer the lower-half crop (45–85 %) when it was used for
-                # identification — it contains the actual zone rows.  Fall back
-                # to the narrow data-region crop if that is all we have, and
-                # generate a fresh lower-half crop when neither exists yet.
-                zone_src = zones_region_text or data_region_text
-                if zone_src is None:
-                    zone_src = _ocr_crop(img_path, 0.45, 0.85)
-                zones = extract_zones(zone_src)
+                # Try every text source we collected and keep the best result.
+                # Order: non-binarized crop first (handles coloured zone-band
+                # backgrounds), then lower-half crop, then binarized crop.
+                # If nothing was collected yet, generate a fresh non-binarized
+                # crop now.
+                candidate_sources = [
+                    s for s in [no_binary_text, zones_region_text, data_region_text]
+                    if s is not None
+                ]
+                if not candidate_sources:
+                    candidate_sources = [_ocr_crop(img_path, 0.04, 0.32, binarize=False)]
+                zones = {}
+                for src in candidate_sources:
+                    candidate = extract_zones(src)
+                    if len(candidate) > len(zones):
+                        zones = candidate
+                    if len(zones) == 5:
+                        break
                 if len(zones) < 5:
-                    # Still missing zones; try full-image text as a last resort.
+                    # Last resort: full-image text.
                     zones_from_full = extract_zones(text)
                     if len(zones_from_full) > len(zones):
                         zones = zones_from_full
