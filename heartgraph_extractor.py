@@ -693,16 +693,30 @@ def create_excel(daily_data, output_path):
 
     # === Data rows ===
     sorted_dates = sorted(daily_data.keys())
+    if not sorted_dates:
+        wb.save(output_path)
+        return 0
 
-    for row_idx, date_key in enumerate(sorted_dates, 3):
-        data = daily_data[date_key]
-        date_obj = data['date']
-        zones, summary, num_sessions = aggregate_day(data)
+    # Iterate over every calendar day from first to last so that days with no
+    # screenshots get a date row with blank values instead of being omitted.
+    first_date = datetime.strptime(sorted_dates[0], '%Y-%m-%d')
+    last_date = datetime.strptime(sorted_dates[-1], '%Y-%m-%d')
+    total_days = (last_date - first_date).days + 1
 
-        # Date column
-        cell = ws.cell(row=row_idx, column=1, value=date_obj.strftime('%A, %B %d, %Y'))
+    for row_idx, day_offset in enumerate(range(total_days), 3):
+        current_date = first_date + timedelta(days=day_offset)
+        date_key = current_date.strftime('%Y-%m-%d')
+
+        # Date column — written for every day, data or blank
+        cell = ws.cell(row=row_idx, column=1, value=current_date.strftime('%A, %B %d, %Y'))
         cell.font = date_font
         cell.alignment = Alignment(horizontal='right')
+
+        if date_key not in daily_data:
+            continue  # leave B-H empty for missing days
+
+        data = daily_data[date_key]
+        zones, summary, _ = aggregate_day(data)
 
         # Zone times (B-F)
         zone_map = {'B': 'zone5', 'C': 'zone4', 'D': 'zone3', 'E': 'zone2', 'F': 'zone1'}
