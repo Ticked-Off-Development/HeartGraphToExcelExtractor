@@ -289,6 +289,9 @@ def classify_screenshot(text):
         return 'summary'
 
     # --- Zones indicators ---
+    # "Zones" (plural) is the page title — unique to the zones screen.
+    if re.search(r'\bZones\b', text, re.IGNORECASE):
+        return 'zones'
     # "Zone" and "Time" on the same line (compact layout)
     if re.search(r'Zone\s+Time', text, re.IGNORECASE):
         return 'zones'
@@ -397,6 +400,23 @@ def _process_folder(folder, year, image_extensions, daily_data):
                 if len(time_matches) >= 5:
                     screenshot_type = 'zones'
 
+            # Second fallback specifically for zones pages: the zone-row
+            # statistics (Zone 5 … Zone 1 with times and percentages) sit in
+            # the lower half of the screen (~45–85 % of height), well below the
+            # narrow 8–32 % strip used for summary/stats identification.
+            zones_region_text = None
+            if screenshot_type == 'unknown':
+                zones_region_text = _ocr_crop(img_path, 0.45, 0.85)
+                screenshot_type = classify_screenshot(zones_region_text)
+                if screenshot_type == 'unknown':
+                    # Classifier still unsure; count time-format values in the
+                    # lower crop — 3 or more strongly indicates a zones screen.
+                    time_matches = re.findall(
+                        r'\b\d{1,2}:\d{2}(?::\d{2})?\b', zones_region_text
+                    )
+                    if len(time_matches) >= 3:
+                        screenshot_type = 'zones'
+
             print(f"  Date: {date.strftime('%A, %B %d, %Y')} | Type: {screenshot_type}")
 
             if date_key not in daily_data:
@@ -407,15 +427,16 @@ def _process_folder(folder, year, image_extensions, daily_data):
                 }
 
             if screenshot_type == 'zones':
-                # Always extract from the data-region crop: full-image OCR
-                # picks up graph x-axis time labels (e.g. "9:00") as false
-                # zone times, while the crop contains only the zone table.
-                if data_region_text is None:
-                    data_region_text = _ocr_crop(img_path, 0.08, 0.32)
-                zones = extract_zones(data_region_text)
+                # Prefer the lower-half crop (45–85 %) when it was used for
+                # identification — it contains the actual zone rows.  Fall back
+                # to the narrow data-region crop if that is all we have, and
+                # generate a fresh lower-half crop when neither exists yet.
+                zone_src = zones_region_text or data_region_text
+                if zone_src is None:
+                    zone_src = _ocr_crop(img_path, 0.45, 0.85)
+                zones = extract_zones(zone_src)
                 if len(zones) < 5:
-                    # data-region OCR still missed some zones; try full-image
-                    # text as a last resort.
+                    # Still missing zones; try full-image text as a last resort.
                     zones_from_full = extract_zones(text)
                     if len(zones_from_full) > len(zones):
                         zones = zones_from_full
