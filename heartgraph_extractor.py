@@ -74,10 +74,19 @@ def extract_text(image_path):
 
 
 def _ocr_crop(image_path, top_frac, bottom_frac):
-    """OCR a horizontal strip of the image between top_frac and bottom_frac (0→1)."""
+    """OCR a horizontal strip of the image between top_frac and bottom_frac (0→1).
+
+    Converts to greyscale and binarises before OCR.  The zone table and summary
+    stats sit on top of a coloured graph-paper grid (teal lines, zone-band fills).
+    Text luminance is ≲160; grid/background luminance is ≳190.  Binarising at
+    160 gives Tesseract a clean black-on-white image and dramatically improves
+    recognition on these backgrounds.
+    """
     img = Image.open(image_path)
     crop = img.crop((0, int(img.height * top_frac), img.width, int(img.height * bottom_frac)))
-    return pytesseract.image_to_string(crop)
+    gray = crop.convert('L')
+    binary = gray.point(lambda x: 255 if x > 160 else 0)
+    return pytesseract.image_to_string(binary)
 
 
 def extract_date(image_path, year=None):
@@ -320,6 +329,16 @@ def _process_folder(folder, year, image_extensions, daily_data):
             if screenshot_type == 'unknown':
                 data_region_text = _ocr_crop(img_path, 0.08, 0.32)
                 screenshot_type = classify_screenshot(data_region_text)
+
+            if screenshot_type == 'unknown' and data_region_text is not None:
+                # Last-resort: keyword patterns still failed (e.g. "Zone"/"Time"
+                # garbled by the grid).  Count time-format values in the data
+                # region: a zones screen has 5 (one per zone row) while a
+                # summary screen has at most 1 (Duration).  No x-axis labels
+                # appear in this narrow crop so false matches aren't a concern.
+                time_matches = re.findall(r'\b\d{1,2}:\d{2}(?::\d{2})?\b', data_region_text)
+                if len(time_matches) >= 5:
+                    screenshot_type = 'zones'
 
             print(f"  Date: {date.strftime('%A, %B %d, %Y')} | Type: {screenshot_type}")
 
