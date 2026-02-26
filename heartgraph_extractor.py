@@ -183,8 +183,14 @@ def extract_zones(text):
         digit of the hour (e.g. ⓘ + "11:08:35" → "41:08:35").
         """
         parts = t.split(':')
-        if len(parts) == 3 and int(parts[0]) > 23:
-            return False
+        if len(parts) == 3:
+            if int(parts[0]) > 23:
+                return False
+            if int(parts[1]) > 59 or int(parts[2]) > 59:
+                return False
+        elif len(parts) == 2:
+            if int(parts[1]) > 59:
+                return False
         return True
 
     zone_data = []
@@ -214,7 +220,7 @@ def extract_zones(text):
         # Also exclude whole-hour clock times (e.g. "3:00") — x-axis labels.
         if not re.search(r'[a-zA-Z]', line):
             m2 = re.search(r'(\d{1,2}:\d{2}(?::\d{2})?)\s*$', line)
-            if m2 and not re.match(r'^\d{1,2}:00$', m2.group(1)) and _plausible(m2.group(1)):
+            if m2 and not re.match(r'^\d{1,2}:00(?::00)?$', m2.group(1)) and _plausible(m2.group(1)):
                 zone_data.append(m2.group(1))
                 continue
 
@@ -267,12 +273,15 @@ def extract_summary(text):
     if 'max_hr' not in summary:
         label_m = re.search(r'(?:Heart\s+rate\s+range|rate\s+range)', text, re.IGNORECASE)
         if label_m:
-            m = re.search(
+            # Use the LAST match before the label — the first match may be an
+            # unrelated number pair from graph axis labels earlier in the OCR
+            # text; the true HR range sits immediately before the label.
+            matches = list(re.finditer(
                 r'(\d{2,3})\s*[-–—]\s*(\d{2,3})',
                 text[:label_m.start()],
-            )
-            if m:
-                summary['max_hr'] = int(m.group(2))
+            ))
+            if matches:
+                summary['max_hr'] = int(matches[-1].group(2))
 
     # Format 2: "Maximum heart rate: YYY" (older) → max HR = YYY
     #
@@ -427,7 +436,7 @@ def normalize_time(time_str):
     parts = time_str.split(':')
     if len(parts) == 2:
         # M:SS → 0:MM:SS
-        return f"0:{parts[0].zfill(2)}:{parts[1]}"
+        return f"0:{parts[0].zfill(2)}:{parts[1].zfill(2)}"
     elif len(parts) == 3:
         return f"{parts[0]}:{parts[1].zfill(2)}:{parts[2].zfill(2)}"
     return time_str
@@ -459,15 +468,14 @@ def _process_folder(folder, year, image_extensions, daily_data):
     year - int year to use for dates, or None to fall back to current year.
     """
     all_files = sorted(folder.iterdir())
-    if not all_files:
-        print(f"  ⚠ Folder appears to be empty or inaccessible: {folder}")
+    image_files = sorted([f for f in all_files if f.is_file() and f.suffix.lower() in image_extensions])
+    if not image_files:
+        print(f"  ⚠ No image files found in: {folder}")
         return
 
-    non_image = [f.name for f in all_files if f.suffix.lower() not in image_extensions and f.is_file()]
+    non_image = [f.name for f in all_files if f.is_file() and f.suffix.lower() not in image_extensions]
     if non_image:
         print(f"  Files found but not matched as images: {non_image}")
-
-    image_files = sorted([f for f in all_files if f.suffix.lower() in image_extensions])
 
     year_label = str(year) if year is not None else "current year"
     print(f"Found {len(image_files)} image files to process (year: {year_label})...")
