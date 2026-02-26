@@ -295,6 +295,26 @@ def normalize_time(time_str):
     return time_str
 
 
+def _time_str_to_excel_serial(time_str):
+    """Convert a H:MM:SS string to an Excel time serial number (fraction of a day).
+
+    Excel stores times as fractions of 24 hours (e.g. 6 hours = 0.25).
+    Writing the numeric value instead of a string lets Excel treat the cell
+    as a true duration without the user having to press Enter to re-evaluate.
+    """
+    parts = time_str.split(':')
+    try:
+        if len(parts) == 3:
+            total_seconds = int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+        elif len(parts) == 2:
+            total_seconds = int(parts[0]) * 60 + int(parts[1])
+        else:
+            return None
+    except ValueError:
+        return None
+    return total_seconds / 86400
+
+
 def _process_folder(folder, year, image_extensions, daily_data):
     """Process all images in a single folder, appending results to daily_data.
 
@@ -558,8 +578,12 @@ def create_excel(daily_data, output_path):
         zone_map = {'B': 'zone5', 'C': 'zone4', 'D': 'zone3', 'E': 'zone2', 'F': 'zone1'}
         for col_letter, zone_key in zone_map.items():
             if zone_key in zones:
-                time_val = normalize_time(zones[zone_key])
-                cell = ws.cell(row=row_idx, column=ord(col_letter) - 64, value=time_val)
+                time_str = normalize_time(zones[zone_key])
+                excel_val = _time_str_to_excel_serial(time_str)
+                cell = ws.cell(row=row_idx, column=ord(col_letter) - 64,
+                               value=excel_val if excel_val is not None else time_str)
+                if excel_val is not None:
+                    cell.number_format = '[h]:mm:ss'
                 cell.font = data_font
                 cell.alignment = Alignment(horizontal='center')
                 cell.fill = zone_fills[col_letter]
