@@ -231,6 +231,13 @@ def classify_screenshot(text):
     # Circled zone-number characters (⑤④③②①) are unique to the zones table
     if re.search(r'[⑤④③②①]', text):
         return 'zones'
+    # Footer buttons that only appear on the zones/graph screen.
+    # Rendered in solid dark text on a teal bar — OCR reads these reliably
+    # even when the lightly-coloured zone percentages are dropped.
+    if re.search(r'Set\s+Reference', text, re.IGNORECASE):
+        return 'zones'
+    if re.search(r'\bZoom\b', text) and re.search(r'\bZone\b', text, re.IGNORECASE):
+        return 'zones'
     # "Zone" header present + percentages (OCR split "Zone" / "Time" onto separate lines,
     # and also tolerate '°' which OCR sometimes substitutes for '%')
     pct_count = text.count('%') + text.count('°')
