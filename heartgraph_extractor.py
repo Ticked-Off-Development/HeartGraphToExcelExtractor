@@ -328,15 +328,21 @@ def extract_summary(text):
     # right column first AND dropped the decimal point, so the integer mean HR
     # sits before the "Mean heart rate:" label and strategies 1–3 all miss it.
     # Take the last plausible integer in the text preceding the label.
-    # Exclude the already-identified max_hr: in a values-first layout the range
-    # "48 - 95" also appears before the label, so without this guard the max HR
-    # integer (95) would be mistakenly returned as the mean HR.
+    #
+    # Exclude HR-range bounds: in a values-first layout the range "48 - 95"
+    # also appears before the label.  Excluding only max_hr left the min bound
+    # (48) as the last candidate, producing mean_hr == min_hr.  Instead, detect
+    # every lo–hi pair in the prefix and exclude both numbers from candidates.
     if 'mean_hr' not in summary:
         label_m = re.search(r'Mean\s+heart', text, re.IGNORECASE)
         if label_m:
-            integers = [int(n) for n in re.findall(r'\b(\d{2,3})\b', text[:label_m.start()])]
-            max_known = summary.get('max_hr')
-            candidates = [v for v in integers if 30 <= v <= 200 and v != max_known]
+            prefix = text[:label_m.start()]
+            range_values = set()
+            for lo, hi in re.findall(r'\b(\d{2,3})\s*[-\u2013\u2014]\s*(\d{2,3})\b', prefix):
+                range_values.add(int(lo))
+                range_values.add(int(hi))
+            integers = [int(n) for n in re.findall(r'\b(\d{2,3})\b', prefix)]
+            candidates = [v for v in integers if 30 <= v <= 200 and v not in range_values]
             if candidates:
                 summary['mean_hr'] = float(candidates[-1])
 
