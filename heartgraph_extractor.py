@@ -73,6 +73,13 @@ def extract_text(image_path):
     return pytesseract.image_to_string(img)
 
 
+def _ocr_crop(image_path, top_frac, bottom_frac):
+    """OCR a horizontal strip of the image between top_frac and bottom_frac (0→1)."""
+    img = Image.open(image_path)
+    crop = img.crop((0, int(img.height * top_frac), img.width, int(img.height * bottom_frac)))
+    return pytesseract.image_to_string(crop)
+
+
 def extract_date(image_path, year=None):
     """Extract the date from the screenshot header by cropping the top.
 
@@ -225,33 +232,38 @@ def extract_summary(text):
 
 def classify_screenshot(text):
     """Determine if a screenshot is a 'zones' or 'summary' type."""
+    # --- Summary indicators checked first (unambiguous; absent from zones screens) ---
+    if re.search(r'\bDuration\b', text, re.IGNORECASE):
+        return 'summary'
+    if re.search(r'Heart\s+rate\s+range', text, re.IGNORECASE):
+        return 'summary'
+    if re.search(r'Maximum\s+heart\s+rate', text, re.IGNORECASE):
+        return 'summary'
+    if re.search(r'Mean\s+heart', text, re.IGNORECASE):
+        return 'summary'
+
+    # --- Zones indicators ---
     # "Zone" and "Time" on the same line (compact layout)
     if re.search(r'Zone\s+Time', text, re.IGNORECASE):
         return 'zones'
     # Circled zone-number characters (⑤④③②①) are unique to the zones table
     if re.search(r'[⑤④③②①]', text):
         return 'zones'
-    # Footer buttons that only appear on the zones/graph screen.
-    # Rendered in solid dark text on a teal bar — OCR reads these reliably
-    # even when the lightly-coloured zone percentages are dropped.
-    if re.search(r'Set\s+Reference', text, re.IGNORECASE):
-        return 'zones'
-    if re.search(r'\bZoom\b', text) and re.search(r'\bZone\b', text, re.IGNORECASE):
-        return 'zones'
     # "Zone" header present + percentages (OCR split "Zone" / "Time" onto separate lines,
     # and also tolerate '°' which OCR sometimes substitutes for '%')
     pct_count = text.count('%') + text.count('°')
     if re.search(r'\bZone\b', text, re.IGNORECASE) and pct_count >= 3:
         return 'zones'
-    if re.search(r'Duration:', text, re.IGNORECASE):
-        return 'summary'
-    if re.search(r'Maximum\s+heart\s+rate', text, re.IGNORECASE):
-        return 'summary'
     # Fallback percentage count (tolerate '°' for '%')
     if pct_count >= 4:
         return 'zones'
-    if re.search(r'Mean\s+heart', text, re.IGNORECASE):
-        return 'summary'
+    # "Set Reference" / "Zoom" footer buttons appear on both zones and summary screens.
+    # All summary keywords have already been checked above, so reaching here means
+    # this is almost certainly a zones screen.
+    if re.search(r'Set\s+Reference', text, re.IGNORECASE):
+        return 'zones'
+    if re.search(r'\bZoom\b', text) and re.search(r'\bZone\b', text, re.IGNORECASE):
+        return 'zones'
     return 'unknown'
 
 
@@ -298,6 +310,17 @@ def _process_folder(folder, year, image_extensions, daily_data):
 
             date_key = date.strftime('%Y-%m-%d')
             screenshot_type = classify_screenshot(text)
+
+            # When full-image OCR can't classify (the large heart-rate graph
+            # dominates and buries the small zone-table / stats text), crop
+            # just the data region — below the nav bar, above the graph
+            # (~8-32 % of image height).  Both the zone table and the summary
+            # stats live in that strip, so a single crop covers both types.
+            data_region_text = None
+            if screenshot_type == 'unknown':
+                data_region_text = _ocr_crop(img_path, 0.08, 0.32)
+                screenshot_type = classify_screenshot(data_region_text)
+
             print(f"  Date: {date.strftime('%A, %B %d, %Y')} | Type: {screenshot_type}")
 
             if date_key not in daily_data:
@@ -308,7 +331,18 @@ def _process_folder(folder, year, image_extensions, daily_data):
                 }
 
             if screenshot_type == 'zones':
-                zones = extract_zones(text)
+                # Always extract from the data-region crop: full-image OCR
+                # picks up graph x-axis time labels (e.g. "9:00") as false
+                # zone times, while the crop contains only the zone table.
+                if data_region_text is None:
+                    data_region_text = _ocr_crop(img_path, 0.08, 0.32)
+                zones = extract_zones(data_region_text)
+                if len(zones) < 5:
+                    # data-region OCR still missed some zones; try full-image
+                    # text as a last resort.
+                    zones_from_full = extract_zones(text)
+                    if len(zones_from_full) > len(zones):
+                        zones = zones_from_full
                 if zones:
                     daily_data[date_key]['zone_sessions'].append(zones)
                     print(f"  Zones extracted: {zones}")
