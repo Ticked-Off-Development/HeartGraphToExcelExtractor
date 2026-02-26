@@ -305,9 +305,9 @@ def extract_summary(text):
                 if 30 <= val <= 200:
                     summary['mean_hr'] = val
 
-    # Strategy 3 (decimal dropped): OCR lost the decimal separator entirely
-    # (e.g. "59.7" → "597" or "59").  Accept a 2–3 digit whole number on the
-    # same OCR line as "Mean heart rate:" that falls in a plausible HR range.
+    # Strategy 3 (decimal dropped, label-first): OCR lost the decimal separator
+    # (e.g. "59.7" → "59").  Accept a 2–3 digit whole number on the same OCR
+    # line as "Mean heart rate:" that falls in a plausible HR range.
     if 'mean_hr' not in summary:
         match = re.search(
             r'Mean\s+heart\s+rate\s*:?\s*(\d{2,3})\b',
@@ -319,6 +319,17 @@ def extract_summary(text):
             if 30 <= val <= 200:
                 summary['mean_hr'] = float(val)
 
+    # Strategy 4 (decimal dropped, values-before-labels): Tesseract read the
+    # right column first AND dropped the decimal point, so the integer mean HR
+    # sits before the "Mean heart rate:" label and strategies 1–3 all miss it.
+    # Take the last plausible integer in the text preceding the label.
+    if 'mean_hr' not in summary:
+        label_m = re.search(r'Mean\s+heart', text, re.IGNORECASE)
+        if label_m:
+            integers = [int(n) for n in re.findall(r'\b(\d{2,3})\b', text[:label_m.start()])]
+            candidates = [v for v in integers if 30 <= v <= 200]
+            if candidates:
+                summary['mean_hr'] = float(candidates[-1])
 
     return summary
 
