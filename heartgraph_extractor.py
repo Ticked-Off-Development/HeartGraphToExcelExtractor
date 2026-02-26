@@ -583,7 +583,7 @@ def create_excel(daily_data, output_path):
                 cell = ws.cell(row=row_idx, column=ord(col_letter) - 64,
                                value=excel_val if excel_val is not None else time_str)
                 if excel_val is not None:
-                    cell.number_format = '[h]:mm:ss'
+                    cell.number_format = 'h:mm:ss'
                 cell.font = data_font
                 cell.alignment = Alignment(horizontal='center')
                 cell.fill = zone_fills[col_letter]
