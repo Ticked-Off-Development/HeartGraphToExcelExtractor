@@ -215,19 +215,34 @@ def extract_summary(text):
     summary = {}
 
     # Format 1: "Heart rate range: 44 - 85" (newer) → max HR = 85
-    # re.DOTALL + non-greedy .*? handles two-column OCR output: Tesseract
-    # sometimes reads all labels first then all values when the label–value
-    # gap is large.  The first \d{2,3}…[-–]…\d{2,3} sequence after the
-    # label keyword is uniquely the HR range pair.
+    # Forward search handles labels-before-values OCR column order.
+    # re.DOTALL + non-greedy .*? bridges the gap when Tesseract emits all
+    # labels first and all values second in a two-column layout.
     match = re.search(
-        r'(?:Heart\s+rate\s+range|rate\s+range).*?(\d{2,3})\s*[-–]\s*(\d{2,3})',
+        r'(?:Heart\s+rate\s+range|rate\s+range).*?(\d{2,3})\s*[-–—]\s*(\d{2,3})',
         text,
         re.IGNORECASE | re.DOTALL,
     )
     if match:
         summary['max_hr'] = int(match.group(2))
 
+    # Backward search for Format 1 (values-before-labels column order):
+    # Tesseract sometimes reads the right column (values) before the left
+    # column (labels), so "46 - 109" appears *before* "Heart rate range:" in
+    # the OCR text and the forward search above finds nothing after the label.
+    # Look for the range pair "XX - YYY" in the text that precedes the label.
+    if 'max_hr' not in summary:
+        label_m = re.search(r'(?:Heart\s+rate\s+range|rate\s+range)', text, re.IGNORECASE)
+        if label_m:
+            m = re.search(
+                r'(\d{2,3})\s*[-–—]\s*(\d{2,3})',
+                text[:label_m.start()],
+            )
+            if m:
+                summary['max_hr'] = int(m.group(2))
+
     # Format 2: "Maximum heart rate: YYY" (older) → max HR = YYY
+    # Forward search.
     if 'max_hr' not in summary:
         match = re.search(
             r'(?:Maximum\s+heart\s+rate|Max\w*\s+heart\s+rate)[:\s]+(\d+)',
@@ -236,6 +251,20 @@ def extract_summary(text):
         )
         if match:
             summary['max_hr'] = int(match.group(1))
+
+    # Backward search for Format 2 (values-before-labels column order):
+    # The max HR integer appears before "Maximum heart rate:" in the text.
+    # HeartGraph lists max HR above mean HR on screen, so in values-first OCR
+    # the max HR integer is the FIRST plausible HR value (≥ 60 bpm) before the
+    # label.  Duration time components (e.g. "14", "00", "18") all fall below
+    # 60 and are safely excluded by the range check.
+    if 'max_hr' not in summary:
+        label_m = re.search(r'(?:Maximum|Max\w*)\s+heart\s+rate', text, re.IGNORECASE)
+        if label_m:
+            integers = [int(n) for n in re.findall(r'\b(\d{2,3})\b', text[:label_m.start()])]
+            candidates = [v for v in integers if 60 <= v <= 220]
+            if candidates:
+                summary['max_hr'] = candidates[0]
 
     # Mean heart rate — three strategies in priority order.
     #
