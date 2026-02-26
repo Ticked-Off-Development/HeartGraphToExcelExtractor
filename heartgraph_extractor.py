@@ -233,16 +233,45 @@ def extract_summary(text):
         if match:
             summary['max_hr'] = int(match.group(1))
 
-    # Mean heart rate — require the decimal point (HeartGraph always shows
-    # e.g. "52.9") so we skip Duration components ("23", "58") and integer
-    # HR-range values ("44", "85") that come earlier in two-column output.
+    # Mean heart rate — three strategies in priority order.
+    #
+    # Strategy 1 (normal): decimal appears after the label.  Accept both '.'
+    # and ',' as the decimal separator (OCR occasionally substitutes a comma).
     match = re.search(
-        r'Mean\s+heart.*?(\d+\.\d+)',
+        r'Mean\s+heart.*?(\d+[.,]\d+)',
         text,
         re.IGNORECASE | re.DOTALL,
     )
     if match:
-        summary['mean_hr'] = float(match.group(1))
+        summary['mean_hr'] = float(match.group(1).replace(',', '.'))
+
+    # Strategy 2 (values-before-labels): Tesseract read the right column
+    # first, so "59.7" sits before "Mean heart rate:" in the OCR text and
+    # the forward search above misses it.  Take the last decimal in the
+    # text that precedes the label and is a plausible HR (30–200 bpm).
+    if 'mean_hr' not in summary:
+        label_m = re.search(r'Mean\s+heart', text, re.IGNORECASE)
+        if label_m:
+            floats = re.findall(r'\b(\d+[.,]\d+)\b', text[:label_m.start()])
+            if floats:
+                val = float(floats[-1].replace(',', '.'))
+                if 30 <= val <= 200:
+                    summary['mean_hr'] = val
+
+    # Strategy 3 (decimal dropped): OCR lost the decimal separator entirely
+    # (e.g. "59.7" → "597" or "59").  Accept a 2–3 digit whole number on the
+    # same OCR line as "Mean heart rate:" that falls in a plausible HR range.
+    if 'mean_hr' not in summary:
+        match = re.search(
+            r'Mean\s+heart\s+rate\s*:?\s*(\d{2,3})\b',
+            text,
+            re.IGNORECASE,
+        )
+        if match:
+            val = int(match.group(1))
+            if 30 <= val <= 200:
+                summary['mean_hr'] = float(val)
+
 
     return summary
 
