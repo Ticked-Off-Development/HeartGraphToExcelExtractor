@@ -73,8 +73,14 @@ def extract_text(image_path):
     return pytesseract.image_to_string(img)
 
 
-def _ocr_crop(image_path, top_frac, bottom_frac, binarize=True):
-    """OCR a horizontal strip of the image between top_frac and bottom_frac (0→1).
+def _ocr_crop(image_path, top_frac, bottom_frac, binarize=True, left_frac=0.0):
+    """OCR a rectangular region of the image.
+
+    top_frac / bottom_frac: vertical bounds (0 → 1, fraction of image height).
+    left_frac: left edge (0 → 1, fraction of image width); right edge is always
+        the full image width.  Defaults to 0 (full width).  Pass e.g. 0.60 to
+        restrict to the rightmost 40 % — useful for isolating the time column of
+        the zone table without ⓘ icon interference.
 
     binarize=True (default): converts to greyscale then applies a fixed
         threshold (luminance > 160 → white).  Works well when the text sits on
@@ -86,7 +92,12 @@ def _ocr_crop(image_path, top_frac, bottom_frac, binarize=True):
         — a fixed threshold turns those bands solid black and masks the text.
     """
     img = Image.open(image_path)
-    crop = img.crop((0, int(img.height * top_frac), img.width, int(img.height * bottom_frac)))
+    crop = img.crop((
+        int(img.width * left_frac),
+        int(img.height * top_frac),
+        img.width,
+        int(img.height * bottom_frac),
+    ))
     gray = crop.convert('L')
     if binarize:
         gray = gray.point(lambda x: 255 if x > 160 else 0)
@@ -163,6 +174,19 @@ def extract_zones(text):
     zones = {}
     lines = text.split('\n')
 
+    def _plausible(t):
+        """Return True if t is a plausible zone duration.
+
+        Rejects H:MM:SS times where H > 23.  A 24-hour HeartGraph session
+        cannot have more than 23 h 59 min in any single zone.  H > 23 arises
+        when the ⓘ info icon is OCR'd as a digit and fused with the leading
+        digit of the hour (e.g. ⓘ + "11:08:35" → "41:08:35").
+        """
+        parts = t.split(':')
+        if len(parts) == 3 and int(parts[0]) > 23:
+            return False
+        return True
+
     zone_data = []
     for line in lines:
         line = line.strip()
@@ -174,7 +198,7 @@ def extract_zones(text):
         match = re.search(
             r'(\d{1,3}\.?\d*)\s*[%°]\s+(?:.*?\s+)?(\d{1,2}:\d{2}(?::\d{2})?)', line
         )
-        if match:
+        if match and _plausible(match.group(2)):
             zone_data.append(match.group(2))
             continue
 
@@ -190,13 +214,13 @@ def extract_zones(text):
         # Also exclude whole-hour clock times (e.g. "3:00") — x-axis labels.
         if not re.search(r'[a-zA-Z]', line):
             m2 = re.search(r'(\d{1,2}:\d{2}(?::\d{2})?)\s*$', line)
-            if m2 and not re.match(r'^\d{1,2}:00$', m2.group(1)):
+            if m2 and not re.match(r'^\d{1,2}:00$', m2.group(1)) and _plausible(m2.group(1)):
                 zone_data.append(m2.group(1))
                 continue
 
         # Strategy 3: line has a zone marker symbol and a time (M:SS or H:MM:SS)
         match = re.search(r'[©@®⑤④③②①\(\)]\s*.*?(\d{1,2}:\d{2}(?::\d{2})?)\s*$', line)
-        if match:
+        if match and _plausible(match.group(1)):
             zone_data.append(match.group(1))
             continue
 
@@ -557,6 +581,20 @@ def _process_folder(folder, year, image_extensions, daily_data):
                         zones = candidate
                     if len(zones) == 5:
                         break
+                if len(zones) < 5:
+                    # Right-side-only crop: the ⓘ info icon sits at ~40–55 % of
+                    # image width, just left of the time column (~60–100 %).
+                    # Cropping to the right 40 % isolates bare time values with
+                    # no icon, preventing OCR from fusing ⓘ with the hour digit
+                    # (e.g. ⓘ + "11:08:35" → "41:08:35").  Try both vertical
+                    # extents to cover both zone-table-above and -below layouts.
+                    for top, bot in [(0.04, 0.40), (0.40, 0.88)]:
+                        right_text = _ocr_crop(img_path, top, bot, binarize=False, left_frac=0.60)
+                        candidate = extract_zones(right_text)
+                        if len(candidate) > len(zones):
+                            zones = candidate
+                        if len(zones) == 5:
+                            break
                 if len(zones) < 5:
                     # Last resort: full-image text.
                     zones_from_full = extract_zones(text)
