@@ -210,11 +210,15 @@ def extract_summary(text):
     """
     summary = {}
 
-    # Format 1: "Heart rate range: XX - YYY" (newer) → max HR = YYY
+    # Format 1: "Heart rate range: 44 - 85" (newer) → max HR = 85
+    # re.DOTALL + non-greedy .*? handles two-column OCR output: Tesseract
+    # sometimes reads all labels first then all values when the label–value
+    # gap is large.  The first \d{2,3}…[-–]…\d{2,3} sequence after the
+    # label keyword is uniquely the HR range pair.
     match = re.search(
-        r'(?:Heart\s+rate\s+range|rate\s+range)[:\s]+(\d+)\s*[-–]\s*(\d+)',
+        r'(?:Heart\s+rate\s+range|rate\s+range).*?(\d{2,3})\s*[-–]\s*(\d{2,3})',
         text,
-        re.IGNORECASE,
+        re.IGNORECASE | re.DOTALL,
     )
     if match:
         summary['max_hr'] = int(match.group(2))
@@ -229,9 +233,13 @@ def extract_summary(text):
         if match:
             summary['max_hr'] = int(match.group(1))
 
-    # Mean heart rate
+    # Mean heart rate — require the decimal point (HeartGraph always shows
+    # e.g. "52.9") so we skip Duration components ("23", "58") and integer
+    # HR-range values ("44", "85") that come earlier in two-column output.
     match = re.search(
-        r'(?:Mean\s+heart\s+rate|mean\s+rate)[:\s]+(\d+\.?\d*)', text, re.IGNORECASE
+        r'Mean\s+heart.*?(\d+\.\d+)',
+        text,
+        re.IGNORECASE | re.DOTALL,
     )
     if match:
         summary['mean_hr'] = float(match.group(1))
