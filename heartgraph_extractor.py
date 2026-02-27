@@ -242,12 +242,15 @@ def extract_zones(text):
                 zone_data.append(t)
                 continue
 
-        # Strategy 2b: ⓘ info icon OCR'd as a letter ('i', 'l') or '©' and
-        # fused at the start of an otherwise letter-free time-only line (e.g.
-        # "i21:09:60" in a right-side-only crop that excluded the percentage
-        # column).  Strategy 2 skips the line because it sees a letter; this
-        # strategy strips the single leading icon character and re-validates.
-        m2b = re.search(r'^[©il](\d{1,2}:\d{2}(?::\d{2})?)\s*$', line)
+        # Strategy 2b: ⓘ info icon OCR'd as a single non-digit character and
+        # fused at the start of an otherwise bare time-only line.  The icon is
+        # a circled 'i' that Tesseract may render as 'i', 'l', '©', 'o', 'e',
+        # or other glyphs depending on font and binarisation — the original
+        # [©il] class missed variants like 'o' (e.g. "o15:32:20"), causing
+        # Zone 1 to be dropped when the ⓘ sits adjacent to its time value.
+        # Accepting any single non-digit, non-whitespace leading character is
+        # safe: in this context only the ⓘ icon can appear before a bare time.
+        m2b = re.search(r'^[^\d\s](\d{1,2}:\d{2}(?::\d{2})?)\s*$', line)
         if m2b and _plausible(m2b.group(1)):
             zone_data.append(m2b.group(1))
             continue
@@ -270,6 +273,37 @@ def extract_zones(text):
         print(f"    ⚠ Only found {len(zone_data)} zone values: {zone_data}")
 
     return zones
+
+
+_ZONE_KEYS = ['zone5', 'zone4', 'zone3', 'zone2', 'zone1']
+
+
+def _try_stitch_zones(d1, d2):
+    """Attempt to stitch two partial zone dicts into a complete 5-zone dict.
+
+    When one crop misses Zone 5 (e.g. "5:00" filtered as a clock hour before
+    the N:00 guard was tightened) and a second crop misses Zone 1 (e.g. the
+    ⓘ icon garbles the last row), the two partial ordered lists share a
+    3-value overlap that reveals the offset and allows them to be merged:
+
+        d1 values: [Z4, Z3, Z2, Z1]       ← missing Zone 5 at position 0
+        d2 values: [Z5, Z4, Z3, Z2]       ← missing Zone 1 at position 4
+        overlap  : [Z4, Z3, Z2] (last 3 of d2 == first 3 of d1)
+        merged   : [Z5, Z4, Z3, Z2, Z1]  ✓
+
+    Only the common 1-step-offset case (one zone missing at either end) is
+    handled; a missing middle zone cannot be recovered this way.  Returns a
+    complete zone dict on success, or None if no valid stitching is found.
+    """
+    r1 = [d1[k] for k in _ZONE_KEYS if k in d1]
+    r2 = [d2[k] for k in _ZONE_KEYS if k in d2]
+    for a, b in [(r1, r2), (r2, r1)]:
+        overlap = len(b) - 1
+        if overlap > 0 and len(a) >= overlap and a[:overlap] == b[1:]:
+            merged = [b[0]] + a
+            if len(merged) == 5:
+                return dict(zip(_ZONE_KEYS, merged))
+    return None
 
 
 def extract_summary(text):
@@ -661,8 +695,11 @@ def _process_folder(folder, year, image_extensions, daily_data):
                         _ocr_crop(img_path, 0.45, 0.85, binarize=False),
                     ]
                 zones = {}
+                all_zone_partials = []  # every non-empty partial for stitching
                 for src in candidate_sources:
                     candidate = extract_zones(src)
+                    if candidate:
+                        all_zone_partials.append(candidate)
                     if len(candidate) > len(zones):
                         zones = candidate
                     if len(zones) == 5:
@@ -679,6 +716,8 @@ def _process_folder(folder, year, image_extensions, daily_data):
                         for top, bot in [(0.04, 0.40), (0.40, 0.88)]:
                             right_text = _ocr_crop(img_path, top, bot, binarize=False, left_frac=left_frac)
                             candidate = extract_zones(right_text)
+                            if candidate:
+                                all_zone_partials.append(candidate)
                             if len(candidate) > len(zones):
                                 zones = candidate
                             if len(zones) == 5:
@@ -688,8 +727,22 @@ def _process_folder(folder, year, image_extensions, daily_data):
                 if len(zones) < 5:
                     # Last resort: full-image text.
                     zones_from_full = extract_zones(text)
+                    if zones_from_full:
+                        all_zone_partials.append(zones_from_full)
                     if len(zones_from_full) > len(zones):
                         zones = zones_from_full
+                if len(zones) < 5 and len(all_zone_partials) >= 2:
+                    # Stitching: two crops each with 4 zones can be merged when
+                    # one is missing Zone 5 (first) and the other Zone 1 (last).
+                    # Their shared 3-value middle overlap identifies the offset.
+                    for i, d1 in enumerate(all_zone_partials):
+                        for d2 in all_zone_partials[i + 1:]:
+                            stitched = _try_stitch_zones(d1, d2)
+                            if stitched:
+                                zones = stitched
+                                break
+                        if len(zones) == 5:
+                            break
                 if zones:
                     daily_data[date_key]['zone_sessions'].append(zones)
                     print(f"  Zones extracted: {zones}")
