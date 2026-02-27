@@ -596,17 +596,21 @@ def _process_folder(folder, year, image_extensions, daily_data):
                     if len(zones) == 5:
                         break
                 if len(zones) < 5:
-                    # Right-side-only crop: the ⓘ info icon sits at ~53 % of
-                    # image width; the time column starts at ~58 %.  Cropping
-                    # from 55 % isolates bare time values without the icon,
-                    # preventing OCR from fusing ⓘ with the hour digit
-                    # (e.g. ⓘ + "11:08:35" → "41:08:35").  Try both vertical
-                    # extents to cover both zone-table-above and -below layouts.
-                    for top, bot in [(0.04, 0.40), (0.40, 0.88)]:
-                        right_text = _ocr_crop(img_path, top, bot, binarize=False, left_frac=0.55)
-                        candidate = extract_zones(right_text)
-                        if len(candidate) > len(zones):
-                            zones = candidate
+                    # Right-side-only crop: the ⓘ info icon sits at ~72–74 % of
+                    # image width; the time column starts at ~76 %.  Cropping
+                    # from 74 % excludes the icon while keeping all five zone
+                    # times, preventing OCR from fusing ⓘ with the hour digit
+                    # (e.g. ⓘ + "11:08:35" → "41:08:35").  Fall back to a
+                    # wider 55 % crop if needed.  Try both vertical extents to
+                    # cover zone-table-above and -below layouts.
+                    for left_frac in [0.74, 0.55]:
+                        for top, bot in [(0.04, 0.40), (0.40, 0.88)]:
+                            right_text = _ocr_crop(img_path, top, bot, binarize=False, left_frac=left_frac)
+                            candidate = extract_zones(right_text)
+                            if len(candidate) > len(zones):
+                                zones = candidate
+                            if len(zones) == 5:
+                                break
                         if len(zones) == 5:
                             break
                 if len(zones) < 5:
