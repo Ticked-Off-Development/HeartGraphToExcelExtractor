@@ -186,7 +186,10 @@ def extract_zones(text):
         if len(parts) == 3:
             if int(parts[0]) > 23:
                 return False
-            if int(parts[1]) > 59 or int(parts[2]) > 59:
+            # Allow SS=60: HeartWatch occasionally displays 60 seconds due to
+            # rounding (e.g. "21:09:60").  The excel-serial conversion handles
+            # it correctly (same total seconds as 21:10:00).
+            if int(parts[1]) > 59 or int(parts[2]) > 60:
                 return False
         elif len(parts) == 2:
             if int(parts[1]) > 59:
