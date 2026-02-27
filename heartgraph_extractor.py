@@ -426,6 +426,26 @@ def extract_summary(text):
     return summary
 
 
+def _drop_invalid_mean(summary):
+    """Remove mean_hr when it is >= max_hr (physiologically impossible).
+
+    This guards against a cascade-merge artefact: the narrow binarised crop
+    may lose the dash in "40 - 90" (producing "40 90"), so Strategy 4's
+    range-exclusion regex never adds 90 to range_values.  If max_hr is also
+    absent from that crop's local dict (because the "Heart rate range:" label
+    itself was garbled), the guard inside extract_summary passes and 90 is
+    stored as mean_hr.  A subsequent cascade step then finds max_hr = 90 and
+    merges it in, yielding mean_hr == max_hr — an impossible result.
+
+    Calling this after every cascade merge evicts the bad value before
+    len(summary) reaches 2, allowing the cascade to continue and recover the
+    correct mean HR from a better source (e.g. the non-binarised top strip).
+    """
+    if ('mean_hr' in summary and 'max_hr' in summary
+            and summary['mean_hr'] >= summary['max_hr']):
+        del summary['mean_hr']
+
+
 def classify_screenshot(text):
     """Determine if a screenshot is a 'zones' or 'summary' type."""
     # --- Summary indicators checked first (unambiguous; absent from zones screens) ---
@@ -660,6 +680,7 @@ def _process_folder(folder, year, image_extensions, daily_data):
                 if data_region_text is None:
                     data_region_text = _ocr_crop(img_path, 0.08, 0.32)
                 summary = extract_summary(data_region_text)
+                _drop_invalid_mean(summary)
 
                 # If the narrow crop returned only one of {max_hr, mean_hr},
                 # try progressively larger sources and *merge* any new values
@@ -673,6 +694,7 @@ def _process_folder(folder, year, image_extensions, daily_data):
                     for k, v in extract_summary(wider).items():
                         if k not in summary:
                             summary[k] = v
+                    _drop_invalid_mean(summary)
 
                 if len(summary) < 2:
                     # Step 1b: non-binarised tight top strip.  The fixed
@@ -688,6 +710,7 @@ def _process_folder(folder, year, image_extensions, daily_data):
                     for k, v in extract_summary(top_stats).items():
                         if k not in summary:
                             summary[k] = v
+                    _drop_invalid_mean(summary)
 
                 if len(summary) < 2:
                     # Step 2: bottom stats strip.  The heart-rate graph
@@ -700,12 +723,14 @@ def _process_folder(folder, year, image_extensions, daily_data):
                     for k, v in extract_summary(bottom_stats).items():
                         if k not in summary:
                             summary[k] = v
+                    _drop_invalid_mean(summary)
 
                 if len(summary) < 2:
                     # Step 3: full-image text as last resort.
                     for k, v in extract_summary(text).items():
                         if k not in summary:
                             summary[k] = v
+                    _drop_invalid_mean(summary)
 
                 if summary:
                     daily_data[date_key]['summary_sessions'].append(summary)
