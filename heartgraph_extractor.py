@@ -220,7 +220,7 @@ def extract_zones(text):
         # Also exclude whole-hour clock times (e.g. "3:00") — x-axis labels.
         if not re.search(r'[a-zA-Z]', line):
             m2 = re.search(r'(\d{1,2}:\d{2}(?::\d{2})?)\s*$', line)
-            if m2 and not re.match(r'^\d{1,2}:00$', m2.group(1)) and _plausible(m2.group(1)):
+            if m2 and not re.match(r'^[1-9]\d?:00$', m2.group(1)) and _plausible(m2.group(1)):
                 zone_data.append(m2.group(1))
                 continue
 
