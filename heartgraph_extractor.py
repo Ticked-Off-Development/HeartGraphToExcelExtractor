@@ -649,6 +649,21 @@ def _process_folder(folder, year, image_extensions, daily_data):
                             summary[k] = v
 
                 if len(summary) < 2:
+                    # Step 1b: non-binarised tight top strip.  The fixed
+                    # binarisation threshold (luminance > 160) sits right on
+                    # the edge of the app's teal background (~161 luminance),
+                    # so some pixels binarise incorrectly and OCR garbles the
+                    # value (e.g. "57.5" → "57 5").  Re-cropping without
+                    # binarisation lets Tesseract use its own adaptive Otsu
+                    # threshold and typically recovers the decimal correctly.
+                    # Capping at 0.22 excludes the heart-rate graph (which
+                    # begins at ~22 %) so coloured zone bands don't interfere.
+                    top_stats = _ocr_crop(img_path, 0.06, 0.22, binarize=False)
+                    for k, v in extract_summary(top_stats).items():
+                        if k not in summary:
+                            summary[k] = v
+
+                if len(summary) < 2:
                     # Step 2: bottom stats strip.  The heart-rate graph
                     # occupies roughly the upper 65 % of the summary screen;
                     # the session stats (Maximum / Mean heart rate) sit below
