@@ -226,11 +226,20 @@ def extract_zones(text):
         # for the capture group.  Fix: check for letters separately, then use a
         # plain end-anchored search so re finds the time from the leftmost digit.
         #
-        # Also exclude whole-hour clock times (e.g. "3:00") — x-axis labels.
+        # Whole-hour clock times (e.g. "3:00", "7:00") are x-axis labels on the
+        # heart-rate graph and must be excluded to avoid contaminating zone data.
+        # However, the exclusion is conditional: if we have not yet collected all
+        # 5 zone times, a "N:00" value may be a legitimate short zone time (e.g.
+        # Zone 5 = "2:00" meaning 2 minutes exactly).  Only skip "N:00" once
+        # 5 zone times are already in hand — by then, any further "N:00" must be
+        # a clock label appearing further down in the OCR (graph x-axis area).
         if not re.search(r'[a-zA-Z]', line):
             m2 = re.search(r'(\d{1,2}:\d{2}(?::\d{2})?)\s*$', line)
-            if m2 and not re.match(r'^[1-9]\d?:00$', m2.group(1)) and _plausible(m2.group(1)):
-                zone_data.append(m2.group(1))
+            if m2 and _plausible(m2.group(1)):
+                t = m2.group(1)
+                if re.match(r'^[1-9]\d?:00$', t) and len(zone_data) >= 5:
+                    continue  # x-axis clock label; all zones already found
+                zone_data.append(t)
                 continue
 
         # Strategy 2b: ⓘ info icon OCR'd as a letter ('i', 'l') or '©' and
