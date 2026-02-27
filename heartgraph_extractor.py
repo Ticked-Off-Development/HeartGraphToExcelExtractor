@@ -204,8 +204,14 @@ def extract_zones(text):
 
         # Strategy 1: line has percentage AND time (e.g., "0.3% 4:48" or "85.1% 12:03:22")
         # Also allow '°' which OCR sometimes substitutes for '%'
+        #
+        # The [©il]? prefix absorbs the ⓘ info icon when it is OCR'd as a
+        # letter ('i', 'l') or copyright symbol ('©') and fused directly with
+        # the leading digit of the time, producing e.g. "88.2% i21:09:60".
+        # The existing (?:.*?\s+)? handles ⓘ when a space follows it ("© ");
+        # [©il]? handles the no-space fused case.
         match = re.search(
-            r'(\d{1,3}\.?\d*)\s*[%°]\s+(?:.*?\s+)?(\d{1,2}:\d{2}(?::\d{2})?)', line
+            r'(\d{1,3}\.?\d*)\s*[%°]\s+(?:.*?\s+)?[©il]?(\d{1,2}:\d{2}(?::\d{2})?)', line
         )
         if match and _plausible(match.group(2)):
             zone_data.append(match.group(2))
@@ -226,6 +232,16 @@ def extract_zones(text):
             if m2 and not re.match(r'^[1-9]\d?:00$', m2.group(1)) and _plausible(m2.group(1)):
                 zone_data.append(m2.group(1))
                 continue
+
+        # Strategy 2b: ⓘ info icon OCR'd as a letter ('i', 'l') or '©' and
+        # fused at the start of an otherwise letter-free time-only line (e.g.
+        # "i21:09:60" in a right-side-only crop that excluded the percentage
+        # column).  Strategy 2 skips the line because it sees a letter; this
+        # strategy strips the single leading icon character and re-validates.
+        m2b = re.search(r'^[©il](\d{1,2}:\d{2}(?::\d{2})?)\s*$', line)
+        if m2b and _plausible(m2b.group(1)):
+            zone_data.append(m2b.group(1))
+            continue
 
         # Strategy 3: line has a zone marker symbol and a time (M:SS or H:MM:SS)
         match = re.search(r'[©@®⑤④③②①\(\)]\s*.*?(\d{1,2}:\d{2}(?::\d{2})?)\s*$', line)
