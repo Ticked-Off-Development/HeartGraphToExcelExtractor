@@ -220,7 +220,7 @@ def extract_zones(text):
         # Also exclude whole-hour clock times (e.g. "3:00") — x-axis labels.
         if not re.search(r'[a-zA-Z]', line):
             m2 = re.search(r'(\d{1,2}:\d{2}(?::\d{2})?)\s*$', line)
-            if m2 and not re.match(r'^\d{1,2}:00(?::00)?$', m2.group(1)) and _plausible(m2.group(1)):
+            if m2 and not re.match(r'^\d{1,2}:00$', m2.group(1)) and _plausible(m2.group(1)):
                 zone_data.append(m2.group(1))
                 continue
 
@@ -326,9 +326,13 @@ def extract_summary(text):
     #
     # Strategy 1 (normal): decimal appears after the label.  Accept both '.'
     # and ',' as the decimal separator (OCR occasionally substitutes a comma).
-    # Guard: only accept values in the plausible 24-hour mean HR range [30–200];
-    # without this, DOTALL can grab a spurious large number from the graph area
-    # (e.g. "560.2" when the real value is "50.2").
+    # Guards:
+    #   • [30–200]: prevents DOTALL from grabbing spurious large graph values
+    #     (e.g. "560.2" when the real value is "50.2").
+    #   • val < max_hr: mean HR must be strictly less than max HR
+    #     (physiological law).  Without this, DOTALL can scan past the actual
+    #     mean HR integer (no decimal point) and land on the max HR expressed
+    #     as "90.0" or similar, making mean == max.
     match = re.search(
         r'Mean\s+heart.*?(\d+[.,]\d+)',
         text,
@@ -336,7 +340,7 @@ def extract_summary(text):
     )
     if match:
         val = float(match.group(1).replace(',', '.'))
-        if 30 <= val <= 200:
+        if 30 <= val <= 200 and ('max_hr' not in summary or val < summary['max_hr']):
             summary['mean_hr'] = val
 
     # Strategy 2 (values-before-labels): Tesseract read the right column
@@ -349,7 +353,7 @@ def extract_summary(text):
             floats = re.findall(r'\b(\d+[.,]\d+)\b', text[:label_m.start()])
             if floats:
                 val = float(floats[-1].replace(',', '.'))
-                if 30 <= val <= 200:
+                if 30 <= val <= 200 and ('max_hr' not in summary or val < summary['max_hr']):
                     summary['mean_hr'] = val
 
     # Strategy 3 (decimal dropped, label-first): OCR lost the decimal separator
@@ -363,7 +367,7 @@ def extract_summary(text):
         )
         if match:
             val = int(match.group(1))
-            if 30 <= val <= 200:
+            if 30 <= val <= 200 and ('max_hr' not in summary or val < summary['max_hr']):
                 summary['mean_hr'] = float(val)
 
     # Strategy 4 (decimal dropped, values-before-labels): Tesseract read the
@@ -384,7 +388,9 @@ def extract_summary(text):
                 range_values.add(int(lo))
                 range_values.add(int(hi))
             integers = [int(n) for n in re.findall(r'\b(\d{2,3})\b', prefix)]
-            candidates = [v for v in integers if 30 <= v <= 200 and v not in range_values]
+            candidates = [v for v in integers
+                          if 30 <= v <= 200 and v not in range_values
+                          and ('max_hr' not in summary or v < summary['max_hr'])]
             if candidates:
                 summary['mean_hr'] = float(candidates[-1])
 
@@ -590,14 +596,14 @@ def _process_folder(folder, year, image_extensions, daily_data):
                     if len(zones) == 5:
                         break
                 if len(zones) < 5:
-                    # Right-side-only crop: the ⓘ info icon sits at ~40–55 % of
-                    # image width, just left of the time column (~60–100 %).
-                    # Cropping to the right 40 % isolates bare time values with
-                    # no icon, preventing OCR from fusing ⓘ with the hour digit
+                    # Right-side-only crop: the ⓘ info icon sits at ~53 % of
+                    # image width; the time column starts at ~58 %.  Cropping
+                    # from 55 % isolates bare time values without the icon,
+                    # preventing OCR from fusing ⓘ with the hour digit
                     # (e.g. ⓘ + "11:08:35" → "41:08:35").  Try both vertical
                     # extents to cover both zone-table-above and -below layouts.
                     for top, bot in [(0.04, 0.40), (0.40, 0.88)]:
-                        right_text = _ocr_crop(img_path, top, bot, binarize=False, left_frac=0.60)
+                        right_text = _ocr_crop(img_path, top, bot, binarize=False, left_frac=0.55)
                         candidate = extract_zones(right_text)
                         if len(candidate) > len(zones):
                             zones = candidate
