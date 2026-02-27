@@ -267,10 +267,15 @@ def extract_summary(text):
     """Extract summary stats from the summary screenshot.
 
     Looks for:
-        - Heart rate range: XX - YYY (max HR = YYY)
+        - Heart rate range: XX - YYY (max HR = YYY, min HR = XX)
         - Mean heart rate: XX.X
     """
     summary = {}
+    # min_hr is the lower bound of the recorded heart-rate range.  When
+    # available (Format 1 only) it is used as a floor for mean_hr so that
+    # Duration time components (e.g. the "32" seconds in "23:59:32") cannot
+    # be accepted as mean HR — they are always below the session minimum HR.
+    min_hr = None
 
     # Format 1: "Heart rate range: 44 - 85" (newer) → max HR = 85
     # Forward search handles labels-before-values OCR column order.
@@ -283,6 +288,7 @@ def extract_summary(text):
     )
     if match:
         summary['max_hr'] = int(match.group(2))
+        min_hr = int(match.group(1))
 
     # Backward search for Format 1 (values-before-labels column order):
     # Tesseract sometimes reads the right column (values) before the left
@@ -301,6 +307,7 @@ def extract_summary(text):
             ))
             if matches:
                 summary['max_hr'] = int(matches[-1].group(2))
+                min_hr = int(matches[-1].group(1))
 
     # Format 2: "Maximum heart rate: YYY" (older) → max HR = YYY
     #
@@ -341,17 +348,17 @@ def extract_summary(text):
             if candidates:
                 summary['max_hr'] = candidates[0]
 
-    # Mean heart rate — three strategies in priority order.
+    # Mean heart rate — four strategies in priority order.
     #
-    # Strategy 1 (normal): decimal appears after the label.  Accept both '.'
-    # and ',' as the decimal separator (OCR occasionally substitutes a comma).
-    # Guards:
-    #   • [30–200]: prevents DOTALL from grabbing spurious large graph values
-    #     (e.g. "560.2" when the real value is "50.2").
-    #   • val < max_hr: mean HR must be strictly less than max HR
-    #     (physiological law).  Without this, DOTALL can scan past the actual
-    #     mean HR integer (no decimal point) and land on the max HR expressed
-    #     as "90.0" or similar, making mean == max.
+    # Every strategy applies three guards:
+    #   • val >= min_hr: mean HR cannot be below the session minimum HR
+    #     (physiological law; only applied when min_hr was extracted from the
+    #     "Heart rate range: XX – YY" pair).  This is the primary defence
+    #     against Duration time components — e.g. the "32" seconds in
+    #     "23:59:32" — being accepted as mean HR when the colon separators are
+    #     lost to binarisation and the time-stripping regex cannot match them.
+    #   • val < max_hr: mean HR must be strictly less than max HR.
+    #   • [30–200]: sanity bounds.
     match = re.search(
         r'Mean\s+heart.*?(\d+[.,]\d+)',
         text,
@@ -359,7 +366,9 @@ def extract_summary(text):
     )
     if match:
         val = float(match.group(1).replace(',', '.'))
-        if 30 <= val <= 200 and ('max_hr' not in summary or val < summary['max_hr']):
+        if (30 <= val <= 200
+                and (min_hr is None or val >= min_hr)
+                and ('max_hr' not in summary or val < summary['max_hr'])):
             summary['mean_hr'] = val
 
     # Strategy 2 (values-before-labels): Tesseract read the right column
@@ -372,7 +381,9 @@ def extract_summary(text):
             floats = re.findall(r'\b(\d+[.,]\d+)\b', text[:label_m.start()])
             if floats:
                 val = float(floats[-1].replace(',', '.'))
-                if 30 <= val <= 200 and ('max_hr' not in summary or val < summary['max_hr']):
+                if (30 <= val <= 200
+                        and (min_hr is None or val >= min_hr)
+                        and ('max_hr' not in summary or val < summary['max_hr'])):
                     summary['mean_hr'] = val
 
     # Strategy 3 (decimal dropped, label-first): OCR lost the decimal separator
@@ -386,7 +397,9 @@ def extract_summary(text):
         )
         if match:
             val = int(match.group(1))
-            if 30 <= val <= 200 and ('max_hr' not in summary or val < summary['max_hr']):
+            if (30 <= val <= 200
+                    and (min_hr is None or val >= min_hr)
+                    and ('max_hr' not in summary or val < summary['max_hr'])):
                 summary['mean_hr'] = float(val)
 
     # Strategy 4 (decimal dropped, values-before-labels): Tesseract read the
@@ -419,6 +432,7 @@ def extract_summary(text):
             integers = [int(n) for n in re.findall(r'\b(\d{2,3})\b', prefix_no_time)]
             candidates = [v for v in integers
                           if 30 <= v <= 200 and v not in range_values
+                          and (min_hr is None or v >= min_hr)
                           and ('max_hr' not in summary or v < summary['max_hr'])]
             if candidates:
                 summary['mean_hr'] = float(candidates[-1])
