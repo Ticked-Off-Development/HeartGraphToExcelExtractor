@@ -638,9 +638,8 @@ def _process_folder(folder, year, image_extensions, daily_data):
                 # If the narrow crop returned only one of {max_hr, mean_hr},
                 # try progressively larger sources and *merge* any new values
                 # rather than replacing.  The narrow crop is preferred because
-                # the full image includes graph Y-axis numbers that can produce
-                # false-positive matches, but those false positives are now also
-                # blocked by the range guards inside extract_summary.
+                # the full image includes graph Y-axis numbers that can
+                # interfere with extraction even after range-guarding.
                 if len(summary) < 2:
                     # Step 1: slightly wider crop — catches stats that sit just
                     # outside the 8-32 % band in some UI layouts.
@@ -650,7 +649,19 @@ def _process_folder(folder, year, image_extensions, daily_data):
                             summary[k] = v
 
                 if len(summary) < 2:
-                    # Step 2: full-image text as last resort.
+                    # Step 2: bottom stats strip.  The heart-rate graph
+                    # occupies roughly the upper 65 % of the summary screen;
+                    # the session stats (Maximum / Mean heart rate) sit below
+                    # it.  Targeting this band directly avoids the Y-axis
+                    # labels (100, 75, 50, 25) and graph-area OCR noise that
+                    # contaminate the full-image extraction.
+                    bottom_stats = _ocr_crop(img_path, 0.65, 0.95)
+                    for k, v in extract_summary(bottom_stats).items():
+                        if k not in summary:
+                            summary[k] = v
+
+                if len(summary) < 2:
+                    # Step 3: full-image text as last resort.
                     for k, v in extract_summary(text).items():
                         if k not in summary:
                             summary[k] = v
