@@ -483,6 +483,25 @@ def extract_summary(text):
     return summary
 
 
+def _mean_hr_tentative(summary):
+    """Return True if mean_hr was found by an integer-only fallback strategy.
+
+    Strategies 1 and 2 require a decimal separator in the OCR text and always
+    produce a value with a non-zero fractional part (e.g. 56.8).  Strategies
+    3 and 4 capture bare integers and store them as floats (e.g. 113.0, 53.0).
+
+    When mean_hr has no fractional part it likely came from Strategy 3 or 4
+    and may be a graph Y-axis label rather than the true mean HR.  In that
+    case the non-binarised top strip (Step 1b) — which excludes the graph
+    area — should be tried and, if it finds a decimal value, used instead.
+
+    Note: a genuine mean HR of exactly N.0 will also trigger this check, but
+    that is harmless: Step 1b will simply confirm the same value or improve it.
+    """
+    val = summary.get('mean_hr')
+    return val is not None and val == float(int(val))
+
+
 def _drop_invalid_mean(summary):
     """Remove mean_hr when it is >= max_hr (physiologically impossible).
 
@@ -772,7 +791,7 @@ def _process_folder(folder, year, image_extensions, daily_data):
                             summary[k] = v
                     _drop_invalid_mean(summary)
 
-                if len(summary) < 2:
+                if len(summary) < 2 or _mean_hr_tentative(summary):
                     # Step 1b: non-binarised tight top strip.  The fixed
                     # binarisation threshold (luminance > 160) sits right on
                     # the edge of the app's teal background (~161 luminance),
@@ -782,9 +801,27 @@ def _process_folder(folder, year, image_extensions, daily_data):
                     # threshold and typically recovers the decimal correctly.
                     # Capping at 0.22 excludes the heart-rate graph (which
                     # begins at ~22 %) so coloured zone bands don't interfere.
+                    #
+                    # Also triggered when mean_hr looks tentative (a whole
+                    # number with no fractional part, implying Strategy 3 or 4
+                    # found an integer rather than a decimal).  A graph Y-axis
+                    # label sitting inside the 8–32 % binarised crop (e.g. 113
+                    # for a session with max_hr 118) can satisfy all numeric
+                    # guards yet still be wrong.  The non-binarised top strip
+                    # ends at 22 % and never includes Y-axis labels, so a
+                    # decimal it finds (e.g. 56.8) is reliable and replaces the
+                    # tentative integer.
                     top_stats = _ocr_crop(img_path, 0.06, 0.22, binarize=False)
-                    for k, v in extract_summary(top_stats).items():
+                    top_result = extract_summary(top_stats)
+                    for k, v in top_result.items():
                         if k not in summary:
+                            summary[k] = v
+                        elif (k == 'mean_hr'
+                              and _mean_hr_tentative(summary)
+                              and not _mean_hr_tentative({'mean_hr': v})):
+                            # Step 1b found a decimal mean_hr; replace the
+                            # tentative integer that came from a binarised crop
+                            # which included part of the graph Y-axis area.
                             summary[k] = v
                     _drop_invalid_mean(summary)
 
