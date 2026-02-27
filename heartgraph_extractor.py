@@ -398,6 +398,15 @@ def extract_summary(text):
     # also appears before the label.  Excluding only max_hr left the min bound
     # (48) as the last candidate, producing mean_hr == min_hr.  Instead, detect
     # every lo–hi pair in the prefix and exclude both numbers from candidates.
+    #
+    # Also strip time-format strings (e.g. Duration "23:59:31") before scanning
+    # for integer candidates.  Without this, the seconds component "31" in
+    # "23:59:31" is the last plausible integer when the actual mean HR decimal
+    # ("55.5") is completely lost to binarisation, yielding mean_hr == 31 instead
+    # of the correct 55.5.  The time sub-pattern \d{1,2}:\d{2}(?::\d{2})? removes
+    # the whole H:MM:SS / M:SS token so none of its digit groups remain as
+    # candidates; any standalone mean-HR integer (e.g. "55" from a garbled
+    # "55.5" on a separate line) is unaffected.
     if 'mean_hr' not in summary:
         label_m = re.search(r'Mean\s+heart', text, re.IGNORECASE)
         if label_m:
@@ -406,7 +415,8 @@ def extract_summary(text):
             for lo, hi in re.findall(r'\b(\d{2,3})\s*[-\u2013\u2014]\s*(\d{2,3})\b', prefix):
                 range_values.add(int(lo))
                 range_values.add(int(hi))
-            integers = [int(n) for n in re.findall(r'\b(\d{2,3})\b', prefix)]
+            prefix_no_time = re.sub(r'\d{1,2}:\d{2}(?::\d{2})?', '', prefix)
+            integers = [int(n) for n in re.findall(r'\b(\d{2,3})\b', prefix_no_time)]
             candidates = [v for v in integers
                           if 30 <= v <= 200 and v not in range_values
                           and ('max_hr' not in summary or v < summary['max_hr'])]
