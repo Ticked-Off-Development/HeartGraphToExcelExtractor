@@ -11,7 +11,12 @@ Then upload your HRM Daily .xlsx file via the sidebar file uploader.
 """
 
 import io
+import warnings
 from datetime import date, datetime, timedelta
+
+# openpyxl emits noisy UserWarnings for unsupported Excel extensions
+# (e.g. conditional-formatting extensions).  They are harmless for our use.
+warnings.filterwarnings("ignore", category=UserWarning, module="openpyxl")
 
 import numpy as np
 import pandas as pd
@@ -346,7 +351,7 @@ with st.expander("🔍 Data debug info (expand if charts are blank)", expanded=F
     preview_cols = ["date"] + [f"{z}_sec" for z in ZONE_ORDER]
     if "mean_hr" in df_full.columns:
         preview_cols.append("mean_hr")
-    st.dataframe(df_full[preview_cols].head(3), use_container_width=True)
+    st.dataframe(df_full[preview_cols].head(3), width="stretch")
 
 st.divider()
 
@@ -406,7 +411,7 @@ with tab1:
             xaxis_showgrid=False,
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         )
-        st.plotly_chart(fig_ov, use_container_width=True)
+        st.plotly_chart(fig_ov, width="stretch")
 
     with col_right:
         st.subheader("Avg zone distribution")
@@ -429,7 +434,7 @@ with tab1:
             showlegend=True,
             legend=dict(orientation="v", x=0.75),
         )
-        st.plotly_chart(fig_donut, use_container_width=True)
+        st.plotly_chart(fig_donut, width="stretch")
 
     # Recent 14 days table
     st.subheader("Recent days (last 14)")
@@ -455,7 +460,7 @@ with tab1:
 
     st.dataframe(
         recent[display_cols].set_index("Date"),
-        use_container_width=True,
+        width="stretch",
     )
 
 
@@ -506,7 +511,7 @@ with tab2:
         hovermode="x unified",
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
     )
-    st.plotly_chart(fig_bar, use_container_width=True)
+    st.plotly_chart(fig_bar, width="stretch")
 
     # Individual zone drill-down
     st.subheader("Drill-down: individual zone trend")
@@ -559,7 +564,7 @@ with tab2:
             hovermode="x unified",
             legend=dict(orientation="h", yanchor="bottom", y=1.02),
         )
-        st.plotly_chart(fig_zone, use_container_width=True)
+        st.plotly_chart(fig_zone, width="stretch")
 
     with col_stats:
         st.markdown("**Zone summary**")
@@ -574,7 +579,7 @@ with tab2:
             })
         st.dataframe(
             pd.DataFrame(stats_rows).set_index("Zone"),
-            use_container_width=True,
+            width="stretch",
         )
 
 
@@ -641,7 +646,7 @@ with tab3:
             showlegend=True,
             legend=dict(orientation="h", yanchor="bottom", y=1.04, xanchor="right", x=1),
         )
-        st.plotly_chart(fig_hr, use_container_width=True)
+        st.plotly_chart(fig_hr, width="stretch")
 
         # HR summary by tag
         if df["tag"].replace("", pd.NA).notna().any() and df["tag"].nunique() > 1:
@@ -662,7 +667,7 @@ with tab3:
                     "max_hr": "Avg Max HR",
                 })
             )
-            st.dataframe(tag_stats, use_container_width=True)
+            st.dataframe(tag_stats, width="stretch")
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -701,7 +706,7 @@ with tab4:
             hovermode="x unified",
             legend=dict(orientation="h", yanchor="bottom", y=1.02),
         )
-        st.plotly_chart(fig_safe, use_container_width=True)
+        st.plotly_chart(fig_safe, width="stretch")
 
     with col_metrics:
         st.subheader("Pacing summary")
@@ -762,7 +767,7 @@ with tab4:
             xaxis_showgrid=False,
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         )
-        st.plotly_chart(fig_tz, use_container_width=True)
+        st.plotly_chart(fig_tz, width="stretch")
 
     # Monthly breakdown
     st.subheader("Monthly summary")
@@ -779,7 +784,7 @@ with tab4:
     monthly = df_m.groupby("month").agg(**agg_m).rename(columns={"date": "Days"})
     monthly["PEM Days"] = monthly["PEM Days"].astype(int)
     monthly["PEM %"] = (monthly["PEM Days"] / monthly["Days"] * 100).round(1)
-    st.dataframe(monthly, use_container_width=True)
+    st.dataframe(monthly, width="stretch")
 
     # Pre-PEM zone pattern
     if pem_days >= 3:
@@ -805,7 +810,7 @@ with tab4:
                     "Difference":        round(pre_avg - base_avg, 3),
                 })
             cmp_df = pd.DataFrame(compare).set_index("Zone")
-            st.dataframe(cmp_df, use_container_width=True)
+            st.dataframe(cmp_df, width="stretch")
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -868,7 +873,7 @@ with tab5:
             xaxis_showgrid=False,
             hovermode="x unified",
         )
-        st.plotly_chart(fig_evt, use_container_width=True)
+        st.plotly_chart(fig_evt, width="stretch")
 
         # Event log table
         st.subheader("Event log")
@@ -882,7 +887,7 @@ with tab5:
         if "mean_hr" in evt_log.columns:
             rename_map["mean_hr"] = "Mean HR"
         evt_log = evt_log.rename(columns=rename_map).set_index("Date")
-        st.dataframe(evt_log, use_container_width=True)
+        st.dataframe(evt_log, width="stretch")
 
         # Before / after 7-day window comparison
         if "mean_hr" in df.columns:
@@ -922,4 +927,4 @@ with tab5:
                 ba_df["Delta"] = (
                     ba_df["Avg HR 7d After"] - ba_df["Avg HR 7d Before"]
                 ).round(1)
-                st.dataframe(ba_df, use_container_width=True)
+                st.dataframe(ba_df, width="stretch")
