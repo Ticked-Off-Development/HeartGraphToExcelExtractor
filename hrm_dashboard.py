@@ -103,18 +103,31 @@ def detect_column(df: pd.DataFrame, candidates: list[str]) -> str | None:
     return None
 
 
-def add_pem_shading(fig: go.Figure, pem_dates, row: int | None = None, col: int | None = None):
-    """Add semi-transparent red vertical rectangles for each PEM day."""
-    kwargs = dict(fillcolor=PEM_SHADE, layer="below", line_width=0)
-    if row is not None:
-        kwargs["row"] = row
-        kwargs["col"] = col
-    for d in pem_dates:
-        fig.add_vrect(
-            x0=d - timedelta(hours=12),
-            x1=d + timedelta(hours=12),
-            **kwargs,
+def add_pem_shading(fig: go.Figure, pem_dates):
+    """Add semi-transparent red vertical rectangles for each PEM day.
+
+    All shapes are added in a single update_layout() call.  The previous
+    approach called add_vrect() once per PEM day, and each call deepcopies
+    the entire figure — with 400+ PEM days that took 40+ seconds.
+    """
+    pem_list = list(pem_dates)
+    if not pem_list:
+        return
+    existing = list(fig.layout.shapes) if fig.layout.shapes else []
+    new_shapes = [
+        dict(
+            type="rect",
+            x0=(d - timedelta(hours=12)).strftime("%Y-%m-%dT%H:%M:%S"),
+            x1=(d + timedelta(hours=12)).strftime("%Y-%m-%dT%H:%M:%S"),
+            y0=0, y1=1,
+            xref="x", yref="paper",
+            fillcolor=PEM_SHADE,
+            layer="below",
+            line_width=0,
         )
+        for d in pem_list
+    ]
+    fig.update_layout(shapes=existing + new_shapes)
 
 
 # ── Data loading ──────────────────────────────────────────────────────────────
@@ -249,7 +262,7 @@ with st.sidebar:
             "Last 30 days", "Last 60 days", "Last 90 days",
             "Last 6 months", "This year", "All time", "Custom",
         ],
-        index=5,
+        index=2,
     )
 
     if preset == "Last 30 days":
@@ -604,9 +617,8 @@ with tab3:
             subplot_titles=("Mean 24hr HR", "Max HR"),
         )
 
-        # PEM shading on both rows
-        for row_n in [1, 2]:
-            add_pem_shading(fig_hr, pem_dates, row=row_n, col=1)
+        # PEM shading — yref="paper" spans both subplot rows in one call
+        add_pem_shading(fig_hr, pem_dates)
 
         if has_mean:
             fig_hr.add_trace(go.Scatter(
