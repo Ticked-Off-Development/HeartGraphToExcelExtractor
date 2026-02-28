@@ -194,6 +194,17 @@ def load_data(file_bytes: bytes) -> pd.DataFrame:
         else pd.Series("", index=df.index)
     )
 
+    # ── Drop date-only rows with no meaningful data ────────────────────────────
+    # Keep a row only if it has at least one of: zone time, mean HR, max HR,
+    # or a non-empty status tag.  Rows that only have a date (e.g. future dates
+    # pre-filled in the sheet, or blank filler rows) are skipped.
+    has_zone    = df["total_sec"] > 0
+    has_mean_hr = df["mean_hr"].notna() if "mean_hr" in df.columns else pd.Series(False, index=df.index)
+    has_max_hr  = df["max_hr"].notna()  if "max_hr"  in df.columns else pd.Series(False, index=df.index)
+    has_tag     = df["tag"] != ""
+
+    df = df[has_zone | has_mean_hr | has_max_hr | has_tag].reset_index(drop=True)
+
     return df
 
 
