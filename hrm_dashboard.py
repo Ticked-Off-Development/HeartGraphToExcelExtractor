@@ -867,8 +867,14 @@ with tab5:
         for _, row in events_df.iterrows():
             evt_name = row["events"].strip()
             color    = evt_color_map.get(evt_name, "#888888")
+            # Plotly 6's add_vline annotation-positioning calls sum() on the x
+            # value to find the midpoint.  sum() starts at 0 (int), so both
+            # Timestamps ("int + Timestamp") and ISO strings ("int + str") raise
+            # TypeError.  Epoch milliseconds are plain floats — sum() works fine
+            # and Plotly date axes understand them.
+            x_ms = row["date"].timestamp() * 1000
             fig_evt.add_vline(
-                x=row["date"].strftime("%Y-%m-%dT%H:%M:%S"),
+                x=x_ms,
                 line_width=2,
                 line_dash="dash",
                 line_color=color,
