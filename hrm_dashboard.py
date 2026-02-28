@@ -202,6 +202,9 @@ def load_data(file_bytes: bytes) -> pd.DataFrame:
     elif "mean_hr" in df.columns:
         df["hr_7d"] = df["mean_hr"].rolling(7, min_periods=1).mean().round(1)
 
+    if "max_hr" in df.columns:
+        df["max_hr_7d"] = df["max_hr"].rolling(7, min_periods=1).mean().round(1)
+
     # ── Tags / PEM status ─────────────────────────────────────────────────────
     tags_col = detect_column(df, ["tag", "status"])
     df["tag"] = (
@@ -648,6 +651,15 @@ with tab3:
                 marker=dict(size=4),
                 hovertemplate="%{x|%a %d %b %Y}<br>Max HR: %{y} bpm<extra></extra>",
             ), row=2, col=1)
+
+            if "max_hr_7d" in df.columns:
+                fig_hr.add_trace(go.Scatter(
+                    x=df["date"], y=df["max_hr_7d"],
+                    mode="lines",
+                    name="7-day avg (max)",
+                    line=dict(color="#EF6C00", width=2.5, dash="dot"),
+                    hovertemplate="%{x|%a %d %b %Y}<br>7-day avg (max): %{y:.1f} bpm<extra></extra>",
+                ), row=2, col=1)
 
         fig_hr.update_yaxes(title_text="bpm", row=1, col=1)
         fig_hr.update_yaxes(title_text="bpm", row=2, col=1)
