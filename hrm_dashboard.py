@@ -868,7 +868,7 @@ with tab5:
             evt_name = row["events"].strip()
             color    = evt_color_map.get(evt_name, "#888888")
             fig_evt.add_vline(
-                x=row["date"],
+                x=row["date"].strftime("%Y-%m-%dT%H:%M:%S"),
                 line_width=2,
                 line_dash="dash",
                 line_color=color,
