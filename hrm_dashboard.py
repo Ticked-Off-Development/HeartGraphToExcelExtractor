@@ -119,9 +119,21 @@ def load_data(file_bytes: bytes) -> pd.DataFrame:
 
     # ── Date ──────────────────────────────────────────────────────────────────
     date_col = df.columns[0]
-    df["date"] = pd.to_datetime(
-        df[date_col], format="%A, %B %d, %Y", errors="coerce"
-    )
+
+    # Step 1: try letting pandas auto-detect (handles Excel datetime objects,
+    # ISO strings, and many other common formats).
+    date_series = pd.to_datetime(df[date_col], errors="coerce")
+
+    # Step 2: if most rows are still NaT, the column likely contains text in
+    # the "Day, Month D, YYYY" format used in the HRM Daily sheet — try that.
+    if date_series.isna().mean() > 0.5:
+        date_series = pd.to_datetime(
+            df[date_col].astype(str).str.strip(),
+            format="%A, %B %d, %Y",
+            errors="coerce",
+        )
+
+    df["date"] = date_series
     df = df.dropna(subset=["date"]).sort_values("date").reset_index(drop=True)
 
     # ── Zone times → seconds, fractional hours, % of session ─────────────────
@@ -285,6 +297,38 @@ k5.metric(
     "Avg Safe Zone %",
     f"{df['safe_pct'].mean():.1f}%" if df["safe_pct"].notna().any() else "—",
 )
+
+st.divider()
+
+# ── Debug expander ────────────────────────────────────────────────────────────
+
+with st.expander("🔍 Data debug info (expand if charts are blank)", expanded=False):
+    st.markdown(f"**Rows loaded:** {len(df_full)}  |  **After date filter:** {len(df)}")
+    st.markdown(f"**Date range in file:** {df_full['date'].min().date()} → {df_full['date'].max().date()}")
+
+    st.markdown("**Columns found in Excel:**")
+    st.code(", ".join(df_full.columns.tolist()))
+
+    zone_detection = {}
+    for z in ZONE_ORDER:
+        col = detect_column(df_full, [z])
+        zone_detection[z] = col or "❌ NOT FOUND"
+    st.markdown("**Zone column mapping:**")
+    st.json(zone_detection)
+
+    hr_cols = {
+        "max_hr": "max_hr" in df_full.columns,
+        "mean_hr": "mean_hr" in df_full.columns,
+        "hr_7d": "hr_7d" in df_full.columns,
+    }
+    st.markdown("**HR columns:**")
+    st.json(hr_cols)
+
+    st.markdown("**Sample data (first 3 rows):**")
+    preview_cols = ["date"] + [f"{z}_sec" for z in ZONE_ORDER]
+    if "mean_hr" in df_full.columns:
+        preview_cols.append("mean_hr")
+    st.dataframe(df_full[preview_cols].head(3), use_container_width=True)
 
 st.divider()
 
