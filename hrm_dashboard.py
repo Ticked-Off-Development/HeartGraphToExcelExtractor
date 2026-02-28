@@ -15,10 +15,17 @@ from datetime import date, datetime, timedelta
 
 import numpy as np
 import pandas as pd
+import plotly.basedatatypes as _pbd
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import streamlit as st
+
+# Plotly 6 encodes numpy/pandas arrays as base64 binary data ({"dtype": …,
+# "bdata": …}).  Streamlit's bundled plotly.js does not support this format,
+# causing every chart to render blank.  Disabling the conversion keeps data
+# as plain JSON arrays, which both plotly.js 2.x and 3.x understand.
+_pbd.convert_to_base64 = lambda obj: None
 
 # ── Page configuration ────────────────────────────────────────────────────────
 st.set_page_config(
