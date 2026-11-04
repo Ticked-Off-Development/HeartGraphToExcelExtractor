@@ -309,6 +309,23 @@ def _try_stitch_zones(d1, d2):
     return None
 
 
+def _find_hr_ranges(text):
+    """Return plausible heart-rate range pairs (lo, hi) found in text.
+
+    The dash may be surrounded only by spaces/tabs, so a pair never spans a
+    line break (the real "41 - 91" is always on one line).  Pairs are kept
+    only when 20 <= lo < hi <= 220, which rejects inverted junk such as
+    "64 - 41" built from garbled Duration digits.  The floor is 20, not 30,
+    because overnight recordings can log a minimum in the high 20s.
+    """
+    pairs = []
+    for m in re.finditer(r'(\d{2,3})[ \t]*[-–—][ \t]*(\d{2,3})', text):
+        lo, hi = int(m.group(1)), int(m.group(2))
+        if 20 <= lo < hi <= 220:
+            pairs.append((lo, hi))
+    return pairs
+
+
 def extract_summary(text):
     """Extract summary stats from the summary screenshot.
 
@@ -327,33 +344,29 @@ def extract_summary(text):
     # Forward search handles labels-before-values OCR column order.
     # re.DOTALL + non-greedy .*? bridges the gap when Tesseract emits all
     # labels first and all values second in a two-column layout.
-    match = re.search(
-        r'(?:Heart\s+rate\s+range|rate\s+range).*?(\d{2,3})\s*[-–—]\s*(\d{2,3})',
-        text,
-        re.IGNORECASE | re.DOTALL,
-    )
-    if match:
-        summary['max_hr'] = int(match.group(2))
-        min_hr = int(match.group(1))
+    #
+    # Range pairs come from _find_hr_ranges, which only matches a pair that
+    # sits on one line and where lo < hi.  A newline-crossing pattern once
+    # matched "64\n- 41" (garbled Duration digits + stray dash + real min HR)
+    # ahead of the true "41-91", giving max_hr = 41.
+    label_m = re.search(r'(?:Heart\s+rate\s+range|rate\s+range)', text, re.IGNORECASE)
+    if label_m:
+        pairs = _find_hr_ranges(text[label_m.end():])
+        if pairs:
+            min_hr, summary['max_hr'] = pairs[0]
 
     # Backward search for Format 1 (values-before-labels column order):
     # Tesseract sometimes reads the right column (values) before the left
     # column (labels), so "46 - 109" appears *before* "Heart rate range:" in
     # the OCR text and the forward search above finds nothing after the label.
     # Look for the range pair "XX - YYY" in the text that precedes the label.
-    if 'max_hr' not in summary:
-        label_m = re.search(r'(?:Heart\s+rate\s+range|rate\s+range)', text, re.IGNORECASE)
-        if label_m:
-            # Use the LAST match before the label — the first match may be an
-            # unrelated number pair from graph axis labels earlier in the OCR
-            # text; the true HR range sits immediately before the label.
-            matches = list(re.finditer(
-                r'(\d{2,3})\s*[-–—]\s*(\d{2,3})',
-                text[:label_m.start()],
-            ))
-            if matches:
-                summary['max_hr'] = int(matches[-1].group(2))
-                min_hr = int(matches[-1].group(1))
+    if 'max_hr' not in summary and label_m:
+        # Use the LAST pair before the label — the first may be an unrelated
+        # number pair from graph axis labels earlier in the OCR text; the
+        # true HR range sits immediately before the label.
+        pairs = _find_hr_ranges(text[:label_m.start()])
+        if pairs:
+            min_hr, summary['max_hr'] = pairs[-1]
 
     # Format 2: "Maximum heart rate: YYY" (older) → max HR = YYY
     #
