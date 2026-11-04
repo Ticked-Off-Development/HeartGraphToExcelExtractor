@@ -2,6 +2,13 @@
 
 Reads **HeartGraph Premium** screenshots and extracts heart rate zone data into an Excel spreadsheet matching Carol's HRM Daily format.
 
+This repository contains two tools:
+
+| Tool | File | Purpose |
+|------|------|---------|
+| **Extractor** | `heartgraph_extractor.py` | OCR screenshots → Excel (HRM Daily format) |
+| **Dashboard** | `hrm_dashboard.py` | Interactive Streamlit dashboard for the Excel file |
+
 ## Overview
 
 HeartGraph tracks your heart rate continuously and shows time spent in each of five heart rate zones. This script uses OCR to read screenshots exported from the app and compiles them into a structured Excel file for easy review and analysis.
@@ -103,3 +110,83 @@ The script could not determine whether the screenshot is a zones or summary view
 
 **No data extracted at all**
 Verify that Tesseract is installed and accessible from the command line (`tesseract --version`), and that the screenshots are valid HeartGraph exports in a supported image format.
+
+---
+
+## HRM Pacing Dashboard
+
+An interactive local web dashboard that reads the HRM Daily Excel file and visualises heart rate zone data, pacing patterns, PEM/STABLE status, and medication events. Charts support zooming, hovering, and drill-down.
+
+### Dashboard Requirements
+
+```bash
+pip install -r requirements_dashboard.txt
+```
+
+Dependencies: `streamlit`, `plotly`, `pandas`, `openpyxl`, `numpy`
+
+### Running the Dashboard
+
+```bash
+streamlit run hrm_dashboard.py
+```
+
+The dashboard opens in your browser at `http://localhost:8501`. Use the sidebar to upload your HRM Daily `.xlsx` file.
+
+### Sidebar Controls
+
+| Control | Description |
+|---------|-------------|
+| File uploader | Upload your HRM Daily `.xlsx` file |
+| Date range | Presets: Last 30/60/90 days, Last 6 months, This year, All time, or Custom |
+| Tag filter | Multi-select to include/exclude PEM, STABLE, STABLE/PEM days |
+
+### Dashboard Tabs
+
+#### 📊 Overview
+- KPI cards: days tracked, PEM days, STABLE days, average mean HR, average safe-zone %
+- Mean HR over time with 7-day rolling average overlay; PEM days shaded in red
+- Average zone distribution donut chart
+- Recent 14-day data table
+
+#### 🔵 Zone Analysis
+- Stacked bar chart of daily zone time — toggle between **Hours** and **% of session**
+- Drill-down selector: pick any zone to view its individual trend line with area fill and 7-day rolling average
+- Zone summary table (average, max, and total time per zone)
+
+#### 📈 HR Trends
+- Two-panel chart (shared x-axis): Mean 24hr HR with 7-day average (top) and Max HR (bottom)
+- PEM days shaded on both panels
+- HR summary table grouped by status tag
+
+#### 🛡️ Pacing & PEM
+- Safe zone % over time: daily scatter + 7-day rolling mean line, with PEM shading
+- Metric cards comparing safe-zone % overall vs PEM days vs STABLE days
+- Grouped bar chart: average time in each zone broken down by tag (PEM / STABLE / etc.)
+- Monthly summary table: days, PEM days, PEM %, average mean HR, average safe zone %
+- Pre-PEM zone pattern table: average zone hours in the 3 days before PEM events vs baseline (shown automatically when ≥3 PEM days are in the selected range)
+
+#### 💊 Events
+- Mean HR timeline with colour-coded vertical annotations for each event in the **Other Events** column
+- Event log table
+- Before / After comparison: average mean HR in the 7 days before and after each event type, with delta
+
+### Excel Columns Used by the Dashboard
+
+The dashboard reads all columns the extractor produces (A–H) plus any additional columns you maintain manually:
+
+| Column | Header | Source |
+|--------|--------|--------|
+| A | Date | Extractor |
+| B | red | Extractor — Zone 5 (highest HR) |
+| C | orange | Extractor — Zone 4 |
+| D | yellow | Extractor — Zone 3 |
+| E | green | Extractor — Zone 2 |
+| F | blue | Extractor — Zone 1 (lowest HR) |
+| G | Max HR (bpm) | Extractor |
+| H | Mean 24 hr HR (bpm) | Extractor |
+| I | Tags | Manual — e.g. `PEM`, `STABLE`, `STABLE/PEM` |
+| J | Other Events | Manual — e.g. `Tirzepatide`, `Sirolimus` |
+| K | 7-day average 24 hr HR | Manual or computed by dashboard if absent |
+
+Column names are detected by substring match, so minor naming variations (e.g. `Tag` vs `Tags`) are handled automatically.

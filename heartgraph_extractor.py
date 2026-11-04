@@ -49,6 +49,9 @@ _win_tesseract = Path(r'C:\Program Files\Tesseract-OCR\tesseract.exe')
 if sys.platform == 'win32' and _win_tesseract.exists():
     pytesseract.pytesseract.tesseract_cmd = str(_win_tesseract)
 
+# Set to True via --debug flag to print raw OCR text for every crop step.
+_DEBUG = False
+
 
 def _check_tesseract():
     """Verify Tesseract is available and print a helpful message if not."""
@@ -776,6 +779,8 @@ def _process_folder(folder, year, image_extensions, daily_data):
                     data_region_text = _ocr_crop(img_path, 0.08, 0.32)
                 summary = extract_summary(data_region_text)
                 _drop_invalid_mean(summary)
+                if _DEBUG:
+                    print(f"    [DEBUG] step 0 (0.08-0.32 binarized) → {summary}\n      text: {repr(data_region_text[:300])}")
 
                 # If the narrow crop returned only one of {max_hr, mean_hr},
                 # try progressively larger sources and *merge* any new values
@@ -790,6 +795,8 @@ def _process_folder(folder, year, image_extensions, daily_data):
                         if k not in summary:
                             summary[k] = v
                     _drop_invalid_mean(summary)
+                    if _DEBUG:
+                        print(f"    [DEBUG] step 1 (0.06-0.38 binarized) → {summary}\n      text: {repr(wider[:300])}")
 
                 if len(summary) < 2 or _mean_hr_tentative(summary):
                     # Step 1b: non-binarised tight top strip.  The fixed
@@ -813,6 +820,8 @@ def _process_folder(folder, year, image_extensions, daily_data):
                     # tentative integer.
                     top_stats = _ocr_crop(img_path, 0.06, 0.22, binarize=False)
                     top_result = extract_summary(top_stats)
+                    if _DEBUG:
+                        print(f"    [DEBUG] step 1b (0.06-0.22 non-binarized) → {top_result}\n      text: {repr(top_stats[:300])}")
                     for k, v in top_result.items():
                         if k not in summary:
                             summary[k] = v
@@ -826,6 +835,21 @@ def _process_folder(folder, year, image_extensions, daily_data):
                     _drop_invalid_mean(summary)
 
                 if len(summary) < 2:
+                    # Step 1c: middle band — covers the gap between the upper
+                    # crops (end at 38 %) and the bottom band (starts at 65 %).
+                    # On some device screen sizes and app versions the stats
+                    # panel sits at roughly 40–65 % of image height, where all
+                    # earlier crops miss it.  Non-binarised so the teal
+                    # background doesn't interfere with Tesseract's threshold.
+                    middle_stats = _ocr_crop(img_path, 0.35, 0.75, binarize=False)
+                    for k, v in extract_summary(middle_stats).items():
+                        if k not in summary:
+                            summary[k] = v
+                    _drop_invalid_mean(summary)
+                    if _DEBUG:
+                        print(f"    [DEBUG] step 1c (0.35-0.75 non-binarized) → {summary}\n      text: {repr(middle_stats[:300])}")
+
+                if len(summary) < 2:
                     # Step 2: bottom stats strip.  The heart-rate graph
                     # occupies roughly the upper 65 % of the summary screen;
                     # the session stats (Maximum / Mean heart rate) sit below
@@ -837,6 +861,8 @@ def _process_folder(folder, year, image_extensions, daily_data):
                         if k not in summary:
                             summary[k] = v
                     _drop_invalid_mean(summary)
+                    if _DEBUG:
+                        print(f"    [DEBUG] step 2 (0.65-0.95 binarized) → {summary}\n      text: {repr(bottom_stats[:300])}")
 
                 if len(summary) < 2:
                     # Step 3: full-image text as last resort.
@@ -844,6 +870,8 @@ def _process_folder(folder, year, image_extensions, daily_data):
                         if k not in summary:
                             summary[k] = v
                     _drop_invalid_mean(summary)
+                    if _DEBUG:
+                        print(f"    [DEBUG] step 3 (full image) → {summary}\n      text: {repr(text[:300])}")
 
                 if summary:
                     daily_data[date_key]['summary_sessions'].append(summary)
@@ -1059,17 +1087,23 @@ def create_excel(daily_data, output_path):
 
 
 def main():
+    global _DEBUG
     _check_tesseract()
 
-    if len(sys.argv) < 2:
-        print("Usage: python heartgraph_extractor.py <screenshot_folder> [output.xlsx]")
+    args = [a for a in sys.argv[1:] if a != '--debug']
+    if len(args) < len(sys.argv) - 1:
+        _DEBUG = True
+
+    if not args:
+        print("Usage: python heartgraph_extractor.py <screenshot_folder> [output.xlsx] [--debug]")
         print()
         print("  screenshot_folder  - Folder containing HeartGraph screenshots")
         print("  output.xlsx        - Output Excel file (default: heartgraph_data.xlsx)")
+        print("  --debug            - Print raw OCR text for every crop step")
         sys.exit(1)
 
-    folder = sys.argv[1]
-    output = sys.argv[2] if len(sys.argv) > 2 else 'heartgraph_data.xlsx'
+    folder = args[0]
+    output = args[1] if len(args) > 1 else 'heartgraph_data.xlsx'
 
     if not os.path.isdir(folder):
         print(f"Error: '{folder}' is not a valid directory")
