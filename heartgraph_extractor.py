@@ -544,6 +544,13 @@ def classify_screenshot(text):
     # "Zone" and "Time" on the same line (compact layout)
     if re.search(r'Zone\s+Time', text, re.IGNORECASE):
         return 'zones'
+    # "Zone" and "Time" column headers OCR'd onto separate lines.  Full-image
+    # OCR sometimes emits "Zone" before the y-axis labels and "Time" after the
+    # x-axis labels, while dropping every '%' and circled zone number — none
+    # of the rules below can then match.  Summary screens contain neither word.
+    if (re.search(r'\bZone\b', text, re.IGNORECASE)
+            and re.search(r'\bTime\b', text, re.IGNORECASE)):
+        return 'zones'
     # Circled zone-number characters (⑤④③②①) are unique to the zones table
     if re.search(r'[⑤④③②①]', text):
         return 'zones'
@@ -687,6 +694,19 @@ def _process_folder(folder, year, image_extensions, daily_data):
                     )
                     if len(time_matches) >= 3:
                         screenshot_type = 'zones'
+
+            # Fifth fallback: OCR only the right-hand time column of the zone
+            # table (from 74 % of width, excluding the ⓘ icon and the coloured
+            # percentage bars).  On some screenshots every wider crop is
+            # garbled by the zone bars and grid, yet this narrow column reads
+            # cleanly.  Five time values means a zones screen.
+            if screenshot_type == 'unknown':
+                time_column_text = _ocr_crop(img_path, 0.04, 0.40, binarize=False, left_frac=0.74)
+                time_matches = re.findall(
+                    r'\b\d{1,2}:\d{2}(?::\d{2})?\b', time_column_text
+                )
+                if len(time_matches) >= 5:
+                    screenshot_type = 'zones'
 
             print(f"  Date: {date.strftime('%A, %B %d, %Y')} | Type: {screenshot_type}")
 
@@ -901,6 +921,8 @@ def _process_folder(folder, year, image_extensions, daily_data):
                     print(f"  ⚠ Could not parse summary data")
             else:
                 print(f"  ⚠ Unknown screenshot type")
+                if _DEBUG:
+                    print(f"    [DEBUG] full image text: {repr(text[:300])}")
 
         except Exception as e:
             print(f"  ✗ Error: {e}")

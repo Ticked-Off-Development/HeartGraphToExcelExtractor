@@ -106,7 +106,7 @@ The OCR could not find a recognisable date in the screenshot header. Ensure the 
 The script found fewer than 5 zone time values. This may happen if the screenshot is blurry, low-contrast, or the zones view uses an unusual layout. Try taking a higher-resolution screenshot.
 
 **"Unknown screenshot type"**
-The script could not determine whether the screenshot is a zones or summary view. Check that it is an unmodified HeartGraph export.
+The script could not determine whether the screenshot is a zones or summary view. Check that it is an unmodified HeartGraph export. Re-run with `--debug` to print the raw OCR text the classifier saw.
 
 **No data extracted at all**
 Verify that Tesseract is installed and accessible from the command line (`tesseract --version`), and that the screenshots are valid HeartGraph exports in a supported image format.
