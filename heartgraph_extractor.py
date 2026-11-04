@@ -76,7 +76,7 @@ def extract_text(image_path):
     return pytesseract.image_to_string(img)
 
 
-def _ocr_crop(image_path, top_frac, bottom_frac, binarize=True, left_frac=0.0):
+def _ocr_crop(image_path, top_frac, bottom_frac, binarize=True, left_frac=0.0, threshold=160):
     """OCR a rectangular region of the image.
 
     top_frac / bottom_frac: vertical bounds (0 → 1, fraction of image height).
@@ -86,8 +86,8 @@ def _ocr_crop(image_path, top_frac, bottom_frac, binarize=True, left_frac=0.0):
         the zone table without ⓘ icon interference.
 
     binarize=True (default): converts to greyscale then applies a fixed
-        threshold (luminance > 160 → white).  Works well when the text sits on
-        a uniform teal grid background (luminance ≳ 190).
+        threshold (luminance > threshold → white, default 160).  Works well
+        when the text sits on a uniform teal grid background (luminance ≳ 190).
 
     binarize=False: passes raw greyscale to Tesseract and lets it use its own
         adaptive (Otsu) thresholding.  Better when text sits on coloured zone
@@ -103,7 +103,7 @@ def _ocr_crop(image_path, top_frac, bottom_frac, binarize=True, left_frac=0.0):
     ))
     gray = crop.convert('L')
     if binarize:
-        gray = gray.point(lambda x: 255 if x > 160 else 0)
+        gray = gray.point(lambda x: 255 if x > threshold else 0)
     return pytesseract.image_to_string(gray)
 
 
@@ -831,6 +831,27 @@ def _process_folder(folder, year, image_extensions, daily_data):
                             # Step 1b found a decimal mean_hr; replace the
                             # tentative integer that came from a binarised crop
                             # which included part of the graph Y-axis area.
+                            summary[k] = v
+                    _drop_invalid_mean(summary)
+
+                if len(summary) < 2 or _mean_hr_tentative(summary):
+                    # Step 1b-alt: same top strip, binarised at a lower
+                    # threshold.  At 160 the grid lines behind the values can
+                    # survive binarisation and close up digits (e.g. "53.9" →
+                    # "83.9", which then fails the mean < max_hr guard), while
+                    # the non-binarised strip may drop the value entirely
+                    # ("53.9" → "SS").  A threshold of 140 pushes the teal
+                    # grid cleanly to white and leaves only the dark text.
+                    low_thr_stats = _ocr_crop(img_path, 0.06, 0.22, threshold=140)
+                    low_thr_result = extract_summary(low_thr_stats)
+                    if _DEBUG:
+                        print(f"    [DEBUG] step 1b-alt (0.06-0.22 binarized @140) → {low_thr_result}\n      text: {repr(low_thr_stats[:300])}")
+                    for k, v in low_thr_result.items():
+                        if k not in summary:
+                            summary[k] = v
+                        elif (k == 'mean_hr'
+                              and _mean_hr_tentative(summary)
+                              and not _mean_hr_tentative({'mean_hr': v})):
                             summary[k] = v
                     _drop_invalid_mean(summary)
 
